@@ -22,16 +22,15 @@ templates = Jinja2Templates(directory="templates")
 # PRIORITAS:
 # 1. Pakai ENV WEATHER_API_KEY (kalau ada)
 # 2. Kalau ENV nggak ada, pakai fallback hardcoded (BIAR PASTI JALAN)
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- key kamu di sini
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key-mu di sini
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
-CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")       # kota default untuk mode WebSocket
-COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")   # kode negara
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))   # interval update WebSocket (detik)
+CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
+COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")  # kode negara
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))  # interval update WebSocket (detik)
 # ============================
 
-print("DEBUG WEATHER_API_KEY LENGTH:", len(WEATHER_API_KEY))
 
 # -------------------------------------------------------------------
 # FUNGSI UTILITAS CUACA
