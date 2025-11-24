@@ -74,6 +74,7 @@
       border-radius: 12px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.15);
       margin-bottom: 30px;
+      background: #ddd;
     }
 
     .note {
@@ -82,6 +83,44 @@
       margin-bottom: 10px;
       text-align: center;
       max-width: 800px;
+    }
+
+    /* ====== RIWAYAT CUACA ====== */
+
+    .history-container {
+      width: 90%;
+      max-width: 800px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+
+    .history-container h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.1rem;
+    }
+
+    #historyTable {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    #historyTable thead {
+      background: #f1f1f1;
+    }
+
+    #historyTable th,
+    #historyTable td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #e0e0e0;
+      text-align: left;
+    }
+
+    #historyTable tbody tr:nth-child(even) {
+      background: #fafafa;
     }
   </style>
 </head>
@@ -99,6 +138,26 @@
     </div>
 
     <div class="debug" id="debug">Status: inisialisasi...</div>
+  </div>
+
+  <!-- RIWAYAT CUACA -->
+  <div class="history-container">
+    <h2>Riwayat Cuaca</h2>
+    <table id="historyTable">
+      <thead>
+        <tr>
+          <th>Waktu</th>
+          <th>Mode</th>
+          <th>Kota</th>
+          <th>Suhu</th>
+          <th>Deskripsi</th>
+          <th>Kelembapan</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- baris riwayat akan ditambahkan dari JS -->
+      </tbody>
+    </table>
   </div>
 
   <p class="note">
@@ -129,12 +188,51 @@
     let socket = null;
     let manualMode = false; // true kalau user sudah klik peta
 
+    // RIWAYAT
+    const historyBody = document.querySelector("#historyTable tbody");
+    const MAX_HISTORY = 20;
+
     function log(msg) {
       console.log(msg);
       debugEl.textContent = "Status: " + msg;
     }
 
-    function applyWeatherToUI(data) {
+    function addHistoryRow(data, mode) {
+      if (!historyBody) return;
+
+      const tr = document.createElement("tr");
+
+      const tempText =
+        data.temp !== null && data.temp !== undefined
+          ? (typeof data.temp === "number"
+              ? data.temp.toFixed(1)
+              : data.temp) + "°C"
+          : "--°C";
+
+      const humText =
+        data.humidity !== null && data.humidity !== undefined
+          ? data.humidity + "%"
+          : "--%";
+
+      tr.innerHTML = `
+        <td>${data.updated_at || "-"}</td>
+        <td>${mode}</td>
+        <td>${data.city || "?"}</td>
+        <td>${tempText}</td>
+        <td>${data.description || "-"}</td>
+        <td>${humText}</td>
+      `;
+
+      // baris baru dimasukkan di atas
+      historyBody.prepend(tr);
+
+      // batasi jumlah baris
+      while (historyBody.rows.length > MAX_HISTORY) {
+        historyBody.deleteRow(-1);
+      }
+    }
+
+    function applyWeatherToUI(data, mode = "otomatis") {
       cityEl.textContent = data.city || "Lokasi tidak diketahui";
 
       if (data.temp !== null && data.temp !== undefined) {
@@ -164,6 +262,9 @@
       if (data.updated_at) {
         updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
       }
+
+      // simpan ke riwayat
+      addHistoryRow(data, mode);
     }
 
     function connectWebSocket() {
@@ -183,7 +284,7 @@
         try {
           const data = JSON.parse(event.data);
           console.log("DATA DARI WS:", data);
-          applyWeatherToUI(data);
+          applyWeatherToUI(data, "otomatis");
         } catch (e) {
           console.error("Error parsing message:", e);
           log("gagal parsing data dari WebSocket");
@@ -211,7 +312,7 @@
         const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
         const data = await res.json();
         console.log("DATA DARI /weather:", data);
-        applyWeatherToUI(data);
+        applyWeatherToUI(data, "manual");
         log("mode manual (peta) - klik lagi untuk lokasi lain");
       } catch (e) {
         console.error("Error fetch /weather:", e);
