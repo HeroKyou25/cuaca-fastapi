@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cuaca Real-time dengan Peta</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS (peta) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: #ffffff;
+      padding: 20px 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 320px;
+      text-align: center;
+      margin-top: 30px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 10px;
+    }
+
+    .city {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .temp {
+      font-size: 2.6rem;
+      margin: 10px 0;
+    }
+
+    .desc {
+      text-transform: capitalize;
+      margin-bottom: 10px;
+    }
+
+    .meta {
+      font-size: 0.9rem;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    .debug {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #777;
+    }
+
+    #map {
+      width: 90%;
+      max-width: 800px;
+      height: 400px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+      margin-bottom: 30px;
+    }
+
+    .note {
+      font-size: 0.85rem;
+      color: #555;
+      margin-bottom: 10px;
+      text-align: center;
+      max-width: 800px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Cuaca Real-time</h1>
+    <div class="city" id="city">Mengambil data...</div>
+    <div class="temp" id="temp">--°C</div>
+    <div class="desc" id="description">-</div>
+
+    <div class="meta">
+      <span id="feels_like">Feels like: --°C</span><br />
+      <span id="humidity">Humidity: --%</span><br />
+      <span id="updated_at">Terakhir update: -</span>
+    </div>
+
+    <div class="debug" id="debug">Status: inisialisasi...</div>
+  </div>
+
+  <p class="note">
+    📍 Peta di bawah ini pakai OpenStreetMap. Klik di mana saja untuk melihat cuaca di titik tersebut.
+    Setelah klik peta, update cuaca akan mengikuti lokasi yang kamu pilih (mode manual).
+  </p>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
+
+  <script>
+    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = wsProtocol + "://" + window.location.host + "/ws";
+
+    const cityEl = document.getElementById("city");
+    const tempEl = document.getElementById("temp");
+    const descEl = document.getElementById("description");
+    const feelsEl = document.getElementById("feels_like");
+    const humEl = document.getElementById("humidity");
+    const updatedAtEl = document.getElementById("updated_at");
+    const debugEl = document.getElementById("debug");
+
+    let socket = null;
+    let manualMode = false; // true kalau user sudah klik peta
+
+    function log(msg) {
+      console.log(msg);
+      debugEl.textContent = "Status: " + msg;
+    }
+
+    function applyWeatherToUI(data) {
+      cityEl.textContent = data.city || "Lokasi tidak diketahui";
+
+      if (data.temp !== null && data.temp !== undefined) {
+        const t = typeof data.temp === "number" ? data.temp.toFixed(1) : data.temp;
+        tempEl.textContent = t + "°C";
+      } else {
+        tempEl.textContent = "--°C";
+      }
+
+      if (data.feels_like !== null && data.feels_like !== undefined) {
+        const f = typeof data.feels_like === "number"
+          ? data.feels_like.toFixed(2)
+          : data.feels_like;
+        feelsEl.textContent = "Feels like: " + f + "°C";
+      } else {
+        feelsEl.textContent = "Feels like: --°C";
+      }
+
+      if (data.humidity !== null && data.humidity !== undefined) {
+        humEl.textContent = "Humidity: " + data.humidity + "%";
+      } else {
+        humEl.textContent = "Humidity: --%";
+      }
+
+      descEl.textContent = data.description || "-";
+
+      if (data.updated_at) {
+        updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
+      }
+    }
+
+    function connectWebSocket() {
+      log("menghubungkan WebSocket (mode otomatis Pontianak)...");
+
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        log("WebSocket terhubung ✅ (mode otomatis)");
+      };
+
+      socket.onmessage = (event) => {
+        if (manualMode) {
+          // kalau sudah klik peta, abaikan data dari WebSocket
+          return;
+        }
+        try {
+          const data = JSON.parse(event.data);
+          console.log("DATA DARI WS:", data);
+          applyWeatherToUI(data);
+        } catch (e) {
+          console.error("Error parsing message:", e);
+          log("gagal parsing data dari WebSocket");
+        }
+      };
+
+      socket.onclose = () => {
+        if (!manualMode) {
+          log("koneksi putus, mencoba ulang dalam 3 detik...");
+          setTimeout(connectWebSocket, 3000);
+        } else {
+          log("WebSocket ditutup (mode manual via peta)");
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        log("error WebSocket");
+      };
+    }
+
+    async function fetchWeatherForCoords(lat, lon) {
+      try {
+        log(`ambil cuaca koordinat (${lat.toFixed(2)}, ${lon.toFixed(2)}) ...`);
+        const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
+        const data = await res.json();
+        console.log("DATA DARI /weather:", data);
+        applyWeatherToUI(data);
+        log("mode manual (peta) - klik lagi untuk lokasi lain");
+      } catch (e) {
+        console.error("Error fetch /weather:", e);
+        log("gagal ambil data dari server");
+      }
+    }
+
+    function initMap() {
+      // fokus awal sekitar Indonesia
+      const map = L.map("map").setView([ -2.5, 118 ], 4);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      let marker = null;
+
+      map.on("click", (e) => {
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+
+        manualMode = true;
+
+        // kalau websocket masih ada, tutup saja biar tidak override
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+
+        if (marker) {
+          marker.setLatLng(e.latlng);
+        } else {
+          marker = L.marker(e.latlng).addTo(map);
+        }
+
+        fetchWeatherForCoords(lat, lon);
+      });
+    }
+
+    window.addEventListener("load", () => {
+      connectWebSocket(); // mode otomatis Pontianak dulu
+      initMap();          // peta untuk pilih lokasi manual
+    });
+  </script>
+</body>
+</html>
