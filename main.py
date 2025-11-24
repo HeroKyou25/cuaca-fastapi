@@ -19,28 +19,23 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIGURASI CUACA ====
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()  # API key dari environment
+# PRIORITAS:
+# 1. Pakai ENV WEATHER_API_KEY (kalau ada)
+# 2. Kalau ENV nggak ada, pakai fallback hardcoded (BIAR PASTI JALAN)
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- key kamu di sini
+
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
+
 CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")       # kota default untuk mode WebSocket
 COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")   # kode negara
 UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))   # interval update WebSocket (detik)
 # ============================
 
+print("DEBUG WEATHER_API_KEY LENGTH:", len(WEATHER_API_KEY))
 
 # -------------------------------------------------------------------
 # FUNGSI UTILITAS CUACA
 # -------------------------------------------------------------------
-
-def _base_error(description: str, city: str | None = None) -> dict:
-    """Template respon kalau terjadi error."""
-    return {
-        "city": city or "Lokasi tidak diketahui",
-        "temp": None,
-        "feels_like": None,
-        "description": description,
-        "humidity": None,
-        "updated_at": datetime.now().strftime("%H:%M:%S"),
-    }
-
 
 def format_weather(data: dict) -> dict:
     """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
@@ -55,20 +50,21 @@ def format_weather(data: dict) -> dict:
         }
     except Exception as e:
         print("Error format_weather:", e, "DATA:", data)
-        return _base_error("Tidak bisa ambil data", data.get("name"))
+        return {
+            "city": data.get("name") if data else "Lokasi tidak diketahui",
+            "temp": None,
+            "feels_like": None,
+            "description": "Tidak bisa ambil data",
+            "humidity": None,
+            "updated_at": datetime.now().strftime("%H:%M:%S"),
+        }
 
 
 def _call_openweather(params: dict) -> dict:
     """
     Panggil API OpenWeather dengan parameter tertentu.
-    Handle:
-    - API key tidak di-set
-    - response error (status code != 200)
+    Kalau API balas error, kirim pesan error ke frontend.
     """
-    if not WEATHER_API_KEY:
-        print("[ERROR] WEATHER_API_KEY tidak diset di server.")
-        return _base_error("API key belum diset di server")
-
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
         "appid": WEATHER_API_KEY,
@@ -86,13 +82,27 @@ def _call_openweather(params: dict) -> dict:
         if res.status_code != 200:
             # Contoh error: {"cod":401,"message":"Invalid API key"}
             msg = data.get("message", "Gagal ambil data dari API cuaca")
-            return _base_error(f"Gagal ambil data: {msg}")
+            return {
+                "city": data.get("name") or "Lokasi tidak diketahui",
+                "temp": None,
+                "feels_like": None,
+                "description": f"Gagal ambil data: {msg}",
+                "humidity": None,
+                "updated_at": datetime.now().strftime("%H:%M:%S"),
+            }
 
         return format_weather(data)
 
     except requests.RequestException as e:
         print("Error saat memanggil OpenWeather:", e)
-        return _base_error("Tidak bisa terhubung ke server cuaca")
+        return {
+            "city": "Lokasi tidak diketahui",
+            "temp": None,
+            "feels_like": None,
+            "description": "Tidak bisa terhubung ke server cuaca",
+            "humidity": None,
+            "updated_at": datetime.now().strftime("%H:%M:%S"),
+        }
 
 
 def get_weather_default() -> dict:
