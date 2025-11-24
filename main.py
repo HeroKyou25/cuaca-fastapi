@@ -59,12 +59,7 @@ templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIGURASI CUACA ====
 
-
-# PRIORITAS:
-# 1. Pakai ENV WEATHER_API_KEY (kalau ada)
-# 2. Kalau ENV nggak ada, pakai fallback hardcoded (BIAR PASTI JALAN)
 FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key-mu di sini
-
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
 CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
@@ -120,10 +115,16 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db.close()
 
 
-def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
+def _call_openweather(
+    params: dict,
+    mode: str,
+    lat=None,
+    lon=None,
+    log_to_db: bool = True,
+) -> dict:
     """
     Panggil API OpenWeather dengan parameter tertentu.
-    Sekaligus simpan log pemanggilan ke DB.
+    Bisa pilih apakah mau disimpan ke DB atau tidak.
     """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
@@ -149,12 +150,13 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
                 "humidity": None,
                 "updated_at": datetime.now().strftime("%H:%M:%S"),
             }
-            # Tetap simpan log meski gagal
-            save_log(mode, data, formatted, lat=lat, lon=lon)
+            if log_to_db:
+                save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
 
         formatted = format_weather(data)
-        save_log(mode, data, formatted, lat=lat, lon=lon)
+        if log_to_db:
+            save_log(mode, data, formatted, lat=lat, lon=lon)
         return formatted
 
     except requests.RequestException as e:
@@ -167,26 +169,30 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "humidity": None,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
-        # Simpan juga error ke log
-        save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
+        if log_to_db:
+            save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
 
 
 def get_weather_default() -> dict:
     """Cuaca default berbasis nama kota (untuk WebSocket)."""
+    # mode otomatis TIDAK disimpan ke DB (log_to_db=False)
     return _call_openweather(
         {"q": f"{CITY},{COUNTRY_CODE}"},
         mode="otomatis",
+        log_to_db=False,
     )
 
 
 def get_weather_by_coords(lat: float, lon: float) -> dict:
     """Cuaca berdasarkan koordinat lat/lon (untuk klik peta)."""
+    # mode manual DISIMPAN ke DB (log_to_db=True)
     return _call_openweather(
         {"lat": lat, "lon": lon},
         mode="manual",
         lat=lat,
         lon=lon,
+        log_to_db=True,
     )
 
 
@@ -227,13 +233,12 @@ async def weather_endpoint(lat: float, lon: float):
     return JSONResponse(content=weather)
 
 
-# ========= ENDPOINT KHUSUS LIHAT LOG (opsional, tidak ditampilkan di UI) =========
+# ========= ENDPOINT LIHAT LOG SEBAGAI JSON =========
 
 @app.get("/logs", response_class=JSONResponse)
 async def get_logs(limit: int = 50):
     """
-    Lihat rekapan pemanggilan API cuaca.
-    Contoh: /logs?limit=20
+    Lihat rekapan pemanggilan API cuaca (JSON).
     """
     db = SessionLocal()
     try:
@@ -260,5 +265,107 @@ async def get_logs(limit: int = 50):
                 }
             )
         return JSONResponse(content=result)
+    finally:
+        db.close()
+
+
+# ========= ENDPOINT LIHAT LOG DALAM BENTUK TABEL HTML =========
+
+@app.get("/logs-view", response_class=HTMLResponse)
+async def logs_view(limit: int = 50):
+    """
+    Viewer HTML sederhana untuk melihat log (tabel),
+    tidak tampil di halaman utama.
+    """
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(WeatherLog)
+            .order_by(WeatherLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        # bikin HTML sederhana
+        html_rows = ""
+        for r in rows:
+            html_rows += f"""
+            <tr>
+              <td>{r.id}</td>
+              <td>{r.api_called_at}</td>
+              <td>{r.mode}</td>
+              <td>{r.city or ""}</td>
+              <td>{r.lat or ""}</td>
+              <td>{r.lon or ""}</td>
+              <td>{r.temp or ""}</td>
+              <td>{r.feels_like or ""}</td>
+              <td>{r.humidity or ""}</td>
+              <td>{r.description or ""}</td>
+            </tr>
+            """
+
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+          <meta charset="utf-8" />
+          <title>Log Pemanggilan API Cuaca</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              background: #f5f5f5;
+              padding: 20px;
+            }}
+            h1 {{
+              margin-bottom: 10px;
+            }}
+            table {{
+              border-collapse: collapse;
+              width: 100%;
+              background: #fff;
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+              font-size: 0.9rem;
+            }}
+            thead {{
+              background: #f0f0f0;
+            }}
+            th, td {{
+              padding: 6px 8px;
+              border-bottom: 1px solid #e0e0e0;
+              text-align: left;
+            }}
+            tr:nth-child(even) td {{
+              background: #fafafa;
+            }}
+          </style>
+        </head>
+        <body>
+          <h1>Log Pemanggilan API Cuaca</h1>
+          <p>Menampilkan maks {limit} data terakhir (hanya mode manual / klik peta).</p>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Waktu (UTC)</th>
+                <th>Mode</th>
+                <th>Kota</th>
+                <th>Lat</th>
+                <th>Lon</th>
+                <th>Temp</th>
+                <th>Feels Like</th>
+                <th>Humidity</th>
+                <th>Deskripsi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {html_rows}
+            </tbody>
+          </table>
+        </body>
+        </html>
+        """
+
+        return HTMLResponse(content=html)
     finally:
         db.close()
