@@ -1,178 +1,3 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8" />
-  <title>Cuaca Real-time dengan Peta</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Leaflet CSS (peta) -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
-
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 100vh;
-    }
-
-    .card {
-      background: #ffffff;
-      padding: 20px 24px;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      width: 320px;
-      text-align: center;
-      margin-top: 30px;
-      margin-bottom: 20px;
-    }
-
-    h1 {
-      font-size: 1.4rem;
-      margin-bottom: 10px;
-    }
-
-    .city {
-      font-weight: bold;
-      margin-bottom: 8px;
-    }
-
-    .temp {
-      font-size: 2.6rem;
-      margin: 10px 0;
-    }
-
-    .desc {
-      text-transform: capitalize;
-      margin-bottom: 10px;
-    }
-
-    .meta {
-      font-size: 0.9rem;
-      color: #555;
-      margin-bottom: 6px;
-    }
-
-    .debug {
-      margin-top: 8px;
-      font-size: 0.8rem;
-      color: #777;
-    }
-
-    #map {
-      width: 90%;
-      max-width: 800px;
-      height: 400px;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-      margin-bottom: 30px;
-      background: #ddd;
-    }
-
-    .note {
-      font-size: 0.85rem;
-      color: #555;
-      margin-bottom: 10px;
-      text-align: center;
-      max-width: 800px;
-    }
-
-    /* ====== RIWAYAT CUACA ====== */
-
-    .history-container {
-      width: 90%;
-      max-width: 800px;
-      background: #ffffff;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-      padding: 16px 20px;
-      margin-bottom: 24px;
-    }
-
-    .history-container h2 {
-      margin: 0 0 10px 0;
-      font-size: 1.1rem;
-    }
-
-    #historyTable {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
-
-    #historyTable thead {
-      background: #f1f1f1;
-    }
-
-    #historyTable th,
-    #historyTable td {
-      padding: 6px 8px;
-      border-bottom: 1px solid #e0e0e0;
-      text-align: left;
-    }
-
-    #historyTable tbody tr:nth-child(even) {
-      background: #fafafa;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Cuaca Real-time</h1>
-    <div class="city" id="city">Mengambil data...</div>
-    <div class="temp" id="temp">--°C</div>
-    <div class="desc" id="description">-</div>
-
-    <div class="meta">
-      <span id="feels_like">Feels like: --°C</span><br />
-      <span id="humidity">Humidity: --%</span><br />
-      <span id="updated_at">Terakhir update: -</span>
-    </div>
-
-    <div class="debug" id="debug">Status: inisialisasi...</div>
-  </div>
-
-  <!-- RIWAYAT CUACA -->
-  <div class="history-container">
-    <h2>Riwayat Cuaca</h2>
-    <table id="historyTable">
-      <thead>
-        <tr>
-          <th>Waktu</th>
-          <th>Mode</th>
-          <th>Kota</th>
-          <th>Suhu</th>
-          <th>Deskripsi</th>
-          <th>Kelembapan</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- baris riwayat akan ditambahkan dari JS -->
-      </tbody>
-    </table>
-  </div>
-
-  <p class="note">
-    📍 Peta di bawah ini pakai OpenStreetMap. Klik di mana saja untuk melihat cuaca di titik tersebut.
-    Setelah klik peta, update cuaca akan mengikuti lokasi yang kamu pilih (mode manual).
-  </p>
-
-  <div id="map"></div>
-
-  <!-- Leaflet JS -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""
-  ></script>
-
   <script>
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const wsUrl = wsProtocol + "://" + window.location.host + "/ws";
@@ -223,10 +48,8 @@
         <td>${humText}</td>
       `;
 
-      // baris baru dimasukkan di atas
       historyBody.prepend(tr);
 
-      // batasi jumlah baris
       while (historyBody.rows.length > MAX_HISTORY) {
         historyBody.deleteRow(-1);
       }
@@ -263,7 +86,6 @@
         updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
       }
 
-      // simpan ke riwayat
       addHistoryRow(data, mode);
     }
 
@@ -321,7 +143,6 @@
     }
 
     function initMap() {
-      // fokus awal sekitar Indonesia
       const map = L.map("map").setView([ -2.5, 118 ], 4);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -337,7 +158,6 @@
 
         manualMode = true;
 
-        // kalau websocket masih ada, tutup saja biar tidak override
         if (socket && socket.readyState === WebSocket.OPEN) {
           socket.close();
         }
@@ -355,7 +175,17 @@
     window.addEventListener("load", () => {
       connectWebSocket(); // mode otomatis Pontianak dulu
       initMap();          // peta untuk pilih lokasi manual
+
+      // === BATASI MODE OTOMATIS HANYA 1 MENIT ===
+      const AUTO_MODE_DURATION_MS = 60 * 1000; // 1 menit
+      setTimeout(() => {
+        if (!manualMode && socket) {
+          manualMode = true;
+          log("Mode otomatis selesai (1 menit). Silakan pilih lokasi di peta.");
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(); // akan memicu onclose, tapi tidak reconnect karena manualMode = true
+          }
+        }
+      }, AUTO_MODE_DURATION_MS);
     });
   </script>
-</body>
-</html>
