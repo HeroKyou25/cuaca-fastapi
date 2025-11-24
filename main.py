@@ -43,13 +43,12 @@ class WeatherLog(Base):
     feels_like = Column(Float, nullable=True)
     humidity = Column(Integer, nullable=True)
     description = Column(String(255), nullable=True)
-    raw_json = Column(Text, nullable=True)  # simpan respon asli dari OpenWeather
+    raw_json = Column(Text, nullable=True)  # respon asli dari OpenWeather
 
 
 Base.metadata.create_all(bind=engine)
 
 # =============================
-
 
 app = FastAPI()
 
@@ -59,7 +58,7 @@ templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIGURASI CUACA ====
 
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key-mu di sini
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key kamu di sini
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
 CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
@@ -115,16 +114,10 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db.close()
 
 
-def _call_openweather(
-    params: dict,
-    mode: str,
-    lat=None,
-    lon=None,
-    log_to_db: bool = True,
-) -> dict:
+def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     """
-    Panggil API OpenWeather dengan parameter tertentu.
-    Bisa pilih apakah mau disimpan ke DB atau tidak.
+    Panggil API OpenWeather dan SELALU simpan ke DB
+    (baik otomatis maupun manual).
     """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
@@ -150,13 +143,11 @@ def _call_openweather(
                 "humidity": None,
                 "updated_at": datetime.now().strftime("%H:%M:%S"),
             }
-            if log_to_db:
-                save_log(mode, data, formatted, lat=lat, lon=lon)
+            save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
 
         formatted = format_weather(data)
-        if log_to_db:
-            save_log(mode, data, formatted, lat=lat, lon=lon)
+        save_log(mode, data, formatted, lat=lat, lon=lon)
         return formatted
 
     except requests.RequestException as e:
@@ -169,30 +160,25 @@ def _call_openweather(
             "humidity": None,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
-        if log_to_db:
-            save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
+        save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
 
 
 def get_weather_default() -> dict:
-    """Cuaca default berbasis nama kota (untuk WebSocket)."""
-    # mode otomatis TIDAK disimpan ke DB (log_to_db=False)
+    """Cuaca default berbasis nama kota (untuk WebSocket, mode otomatis)."""
     return _call_openweather(
         {"q": f"{CITY},{COUNTRY_CODE}"},
         mode="otomatis",
-        log_to_db=False,
     )
 
 
 def get_weather_by_coords(lat: float, lon: float) -> dict:
-    """Cuaca berdasarkan koordinat lat/lon (untuk klik peta)."""
-    # mode manual DISIMPAN ke DB (log_to_db=True)
+    """Cuaca berdasarkan koordinat lat/lon (mode manual / klik peta)."""
     return _call_openweather(
         {"lat": lat, "lon": lon},
         mode="manual",
         lat=lat,
         lon=lon,
-        log_to_db=True,
     )
 
 
@@ -269,39 +255,52 @@ async def get_logs(limit: int = 50):
         db.close()
 
 
-# ========= ENDPOINT LIHAT LOG DALAM BENTUK TABEL HTML =========
+# ========= ENDPOINT LIHAT LOG DALAM BENTUK DUA TABEL HTML =========
 
 @app.get("/logs-view", response_class=HTMLResponse)
 async def logs_view(limit: int = 50):
     """
-    Viewer HTML sederhana untuk melihat log (tabel),
-    tidak tampil di halaman utama.
+    Viewer HTML sederhana untuk melihat log:
+    - Tabel 1: mode otomatis
+    - Tabel 2: mode manual
     """
     db = SessionLocal()
     try:
-        rows = (
+        auto_rows = (
             db.query(WeatherLog)
+            .filter(WeatherLog.mode == "otomatis")
             .order_by(WeatherLog.id.desc())
             .limit(limit)
             .all()
         )
-        # bikin HTML sederhana
-        html_rows = ""
-        for r in rows:
-            html_rows += f"""
-            <tr>
-              <td>{r.id}</td>
-              <td>{r.api_called_at}</td>
-              <td>{r.mode}</td>
-              <td>{r.city or ""}</td>
-              <td>{r.lat or ""}</td>
-              <td>{r.lon or ""}</td>
-              <td>{r.temp or ""}</td>
-              <td>{r.feels_like or ""}</td>
-              <td>{r.humidity or ""}</td>
-              <td>{r.description or ""}</td>
-            </tr>
-            """
+        manual_rows = (
+            db.query(WeatherLog)
+            .filter(WeatherLog.mode == "manual")
+            .order_by(WeatherLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+        def build_rows(rows):
+            html = ""
+            for r in rows:
+                html += f"""
+                <tr>
+                  <td>{r.id}</td>
+                  <td>{r.api_called_at}</td>
+                  <td>{r.city or ""}</td>
+                  <td>{r.lat or ""}</td>
+                  <td>{r.lon or ""}</td>
+                  <td>{r.temp or ""}</td>
+                  <td>{r.feels_like or ""}</td>
+                  <td>{r.humidity or ""}</td>
+                  <td>{r.description or ""}</td>
+                </tr>
+                """
+            return html
+
+        auto_rows_html = build_rows(auto_rows)
+        manual_rows_html = build_rows(manual_rows)
 
         html = f"""
         <!DOCTYPE html>
@@ -316,7 +315,11 @@ async def logs_view(limit: int = 50):
               padding: 20px;
             }}
             h1 {{
-              margin-bottom: 10px;
+              margin-bottom: 4px;
+            }}
+            h2 {{
+              margin-top: 24px;
+              margin-bottom: 8px;
             }}
             table {{
               border-collapse: collapse;
@@ -326,6 +329,7 @@ async def logs_view(limit: int = 50):
               overflow: hidden;
               box-shadow: 0 3px 8px rgba(0,0,0,0.1);
               font-size: 0.9rem;
+              margin-bottom: 16px;
             }}
             thead {{
               background: #f0f0f0;
@@ -342,13 +346,14 @@ async def logs_view(limit: int = 50):
         </head>
         <body>
           <h1>Log Pemanggilan API Cuaca</h1>
-          <p>Menampilkan maks {limit} data terakhir (hanya mode manual / klik peta).</p>
+          <p>Menampilkan maks {limit} data terakhir per mode.</p>
+
+          <h2>Mode Otomatis (WebSocket, kota default)</h2>
           <table>
             <thead>
               <tr>
                 <th>ID</th>
                 <th>Waktu (UTC)</th>
-                <th>Mode</th>
                 <th>Kota</th>
                 <th>Lat</th>
                 <th>Lon</th>
@@ -359,7 +364,27 @@ async def logs_view(limit: int = 50):
               </tr>
             </thead>
             <tbody>
-              {html_rows}
+              {auto_rows_html}
+            </tbody>
+          </table>
+
+          <h2>Mode Manual (klik peta)</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Waktu (UTC)</th>
+                <th>Kota</th>
+                <th>Lat</th>
+                <th>Lon</th>
+                <th>Temp</th>
+                <th>Feels Like</th>
+                <th>Humidity</th>
+                <th>Deskripsi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {manual_rows_html}
             </tbody>
           </table>
         </body>
