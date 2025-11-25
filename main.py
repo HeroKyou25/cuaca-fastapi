@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -34,7 +34,7 @@ class WeatherLog(Base):
     __tablename__ = "weather_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    api_called_at = Column(DateTime, default=datetime.utcnow, index=True)
+    api_called_at = Column(DateTime, index=True)  # akan diisi dengan waktu WIB
     mode = Column(String(20))          # "otomatis" / "manual"
     city = Column(String(100), nullable=True)
     lat = Column(Float, nullable=True)
@@ -58,12 +58,24 @@ templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIGURASI CUACA ====
 
+
+# API key: pakai ENV kalau ada, kalau tidak pakai fallback
 FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key kamu di sini
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
 CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
 COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")  # kode negara
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))  # interval update WebSocket (detik)
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60"))  # interval update WebSocket (detik) -> 60 = 1 menit
+
+# Waktu WIB (UTC+7)
+WIB_OFFSET = timedelta(hours=7)
+
+
+def now_wib() -> datetime:
+    """Mengembalikan waktu sekarang dalam WIB."""
+    return datetime.utcnow() + WIB_OFFSET
+
+
 # ============================
 
 
@@ -76,7 +88,7 @@ def format_weather(data: dict) -> dict:
             "feels_like": data["main"]["feels_like"],
             "description": data["weather"][0]["description"],
             "humidity": data["main"]["humidity"],
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
     except Exception as e:
         print("Error format_weather:", e, "DATA:", data)
@@ -86,17 +98,17 @@ def format_weather(data: dict) -> dict:
             "feels_like": None,
             "description": "Tidak bisa ambil data",
             "humidity": None,
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
 
 
 def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
-    """Simpan rekaman pemanggilan API ke database SQLite."""
+    """Simpan rekaman pemanggilan API ke database SQLite (waktu disimpan sebagai WIB)."""
     try:
         db = SessionLocal()
         log = WeatherLog(
             mode=mode,
-            api_called_at=datetime.utcnow(),
+            api_called_at=now_wib(),  # simpan langsung WIB
             city=formatted.get("city"),
             lat=lat,
             lon=lon,
@@ -141,7 +153,7 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
                 "feels_like": None,
                 "description": f"Gagal ambil data: {msg}",
                 "humidity": None,
-                "updated_at": datetime.now().strftime("%H:%M:%S"),
+                "updated_at": now_wib().strftime("%H:%M:%S WIB"),
             }
             save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
@@ -158,7 +170,7 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "feels_like": None,
             "description": "Tidak bisa terhubung ke server cuaca",
             "humidity": None,
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
         save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
@@ -193,6 +205,7 @@ async def ws(websocket: WebSocket):
     """
     WebSocket: kirim data cuaca default berkala ke client.
     Dipakai untuk mode otomatis (kota default).
+    Interval diatur oleh UPDATE_INTERVAL (detik).
     """
     await websocket.accept()
     try:
@@ -239,7 +252,7 @@ async def get_logs(limit: int = 50):
             result.append(
                 {
                     "id": r.id,
-                    "api_called_at": r.api_called_at.isoformat(),
+                    "api_called_at": r.api_called_at.strftime("%Y-%m-%d %H:%M:%S WIB"),
                     "mode": r.mode,
                     "city": r.city,
                     "lat": r.lat,
@@ -287,7 +300,7 @@ async def logs_view(limit: int = 50):
                 html += f"""
                 <tr>
                   <td>{r.id}</td>
-                  <td>{r.api_called_at}</td>
+                  <td>{r.api_called_at.strftime('%Y-%m-%d %H:%M:%S WIB')}</td>
                   <td>{r.city or ""}</td>
                   <td>{r.lat or ""}</td>
                   <td>{r.lon or ""}</td>
@@ -346,14 +359,14 @@ async def logs_view(limit: int = 50):
         </head>
         <body>
           <h1>Log Pemanggilan API Cuaca</h1>
-          <p>Menampilkan maks {limit} data terakhir per mode.</p>
+          <p>Waktu pada tabel sudah dikonversi ke WIB. Menampilkan maks {limit} data terakhir per mode.</p>
 
           <h2>Mode Otomatis (WebSocket, kota default)</h2>
           <table>
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Waktu (UTC)</th>
+                <th>Waktu (WIB)</th>
                 <th>Kota</th>
                 <th>Lat</th>
                 <th>Lon</th>
@@ -373,7 +386,7 @@ async def logs_view(limit: int = 50):
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Waktu (UTC)</th>
+                <th>Waktu (WIB)</th>
                 <th>Kota</th>
                 <th>Lat</th>
                 <th>Lon</th>
