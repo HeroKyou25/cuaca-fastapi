@@ -34,8 +34,8 @@ class WeatherLog(Base):
     __tablename__ = "weather_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    api_called_at = Column(DateTime, index=True)  # akan diisi dengan waktu WIB
-    mode = Column(String(20))          # "otomatis" / "manual"
+    api_called_at = Column(DateTime, index=True)  
+    mode = Column(String(20))          
     city = Column(String(100), nullable=True)
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
@@ -43,7 +43,7 @@ class WeatherLog(Base):
     feels_like = Column(Float, nullable=True)
     humidity = Column(Integer, nullable=True)
     description = Column(String(255), nullable=True)
-    raw_json = Column(Text, nullable=True)  # respon asli dari OpenWeather
+    raw_json = Column(Text, nullable=True)
 
 
 Base.metadata.create_all(bind=engine)
@@ -60,12 +60,12 @@ templates = Jinja2Templates(directory="templates")
 
 
 # API key: pakai ENV kalau ada, kalau tidak pakai fallback
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key kamu di sini
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219" 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
-CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
-COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")  # kode negara
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60"))  # interval update WebSocket (detik) -> 60 = 1 menit
+CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")   
+COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60")) 
 
 # Waktu WIB (UTC+7)
 WIB_OFFSET = timedelta(hours=7)
@@ -407,3 +407,4 @@ async def logs_view(limit: int = 50):
         return HTMLResponse(content=html)
     finally:
         db.close()
+
