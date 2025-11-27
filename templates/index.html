@@ -12,7 +12,7 @@
     crossorigin=""
   />
 
-  <!-- Weather Icons -->
+  <!-- Weather Icons (ikon cuaca, bukan dari OpenWeather) -->
   <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css"
@@ -139,8 +139,8 @@
     <div class="city" id="city">Mengambil data...</div>
 
     <!-- ICON CUACA -->
-    <div>
-      <i id="weather_icon" class="wi" style="font-size: 48px;"></i>
+    <div style="margin-bottom: 8px;">
+      <i id="weather_icon" class="wi wi-na" style="font-size: 48px;"></i>
     </div>
 
     <div class="temp" id="temp">--°C</div>
@@ -170,6 +170,7 @@
         </tr>
       </thead>
       <tbody>
+        <!-- baris riwayat akan ditambahkan dari JS -->
       </tbody>
     </table>
   </div>
@@ -200,8 +201,9 @@
     const iconEl = document.getElementById("weather_icon");
 
     let socket = null;
-    let manualMode = false;
+    let manualMode = false; // true kalau user sudah klik peta
 
+    // RIWAYAT
     const historyBody = document.querySelector("#historyTable tbody");
     const MAX_HISTORY = 20;
 
@@ -211,6 +213,8 @@
     }
 
     function addHistoryRow(data, mode) {
+      if (!historyBody) return;
+
       const tr = document.createElement("tr");
 
       const tempText =
@@ -235,17 +239,19 @@
       `;
 
       historyBody.prepend(tr);
+
       while (historyBody.rows.length > MAX_HISTORY) {
         historyBody.deleteRow(-1);
       }
     }
 
+    // Mapping kondisi -> icon Weather Icons
     function getIconClass(condition) {
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
-        case "Drizzle": return "wi-sprinkle";
-        case "Rain": return "wi-rain";
-        case "Snow": return "wi-snow";
+        case "Drizzle":      return "wi-sprinkle";
+        case "Rain":         return "wi-rain";
+        case "Snow":         return "wi-snow";
         case "Mist":
         case "Smoke":
         case "Haze":
@@ -255,17 +261,17 @@
         case "Ash":
         case "Squall":
           return "wi-fog";
-        case "Tornado": return "wi-tornado";
-        case "Clouds": return "wi-cloudy";
-        case "Clear": return "wi-day-sunny";
-        default: return "wi-na";
+        case "Tornado":      return "wi-tornado";
+        case "Clouds":       return "wi-cloudy";
+        case "Clear":        return "wi-day-sunny";
+        default:             return "wi-na";
       }
     }
 
     function applyWeatherToUI(data, mode = "otomatis") {
       cityEl.textContent = data.city || "Lokasi tidak diketahui";
 
-      // ICON
+      // === ICON CUACA ===
       if (iconEl) {
         const cls = getIconClass(data.condition);
         iconEl.className = "wi " + cls;
@@ -274,18 +280,24 @@
       if (data.temp !== null && data.temp !== undefined) {
         const t = typeof data.temp === "number" ? data.temp.toFixed(1) : data.temp;
         tempEl.textContent = t + "°C";
-      } else tempEl.textContent = "--°C";
+      } else {
+        tempEl.textContent = "--°C";
+      }
 
       if (data.feels_like !== null && data.feels_like !== undefined) {
         const f = typeof data.feels_like === "number"
           ? data.feels_like.toFixed(2)
           : data.feels_like;
         feelsEl.textContent = "Feels like: " + f + "°C";
-      } else feelsEl.textContent = "Feels like: --°C";
+      } else {
+        feelsEl.textContent = "Feels like: --°C";
+      }
 
       if (data.humidity !== null && data.humidity !== undefined) {
         humEl.textContent = "Humidity: " + data.humidity + "%";
-      } else humEl.textContent = "Humidity: --%";
+      } else {
+        humEl.textContent = "Humidity: --%";
+      }
 
       descEl.textContent = data.description || "-";
 
@@ -301,19 +313,36 @@
 
       socket = new WebSocket(wsUrl);
 
-      socket.onopen = () => log("WebSocket terhubung ✅ (mode otomatis)");
+      socket.onopen = () => {
+        log("WebSocket terhubung ✅ (mode otomatis)");
+      };
 
       socket.onmessage = (event) => {
-        if (manualMode) return;
-        const data = JSON.parse(event.data);
-        applyWeatherToUI(data, "otomatis");
+        if (manualMode) {
+          return;
+        }
+        try {
+          const data = JSON.parse(event.data);
+          console.log("DATA DARI WS:", data);
+          applyWeatherToUI(data, "otomatis");
+        } catch (e) {
+          console.error("Error parsing message:", e);
+          log("gagal parsing data dari WebSocket");
+        }
       };
 
       socket.onclose = () => {
         if (!manualMode) {
-          log("koneksi putus, mencoba ulang...");
+          log("koneksi putus, mencoba ulang dalam 3 detik...");
           setTimeout(connectWebSocket, 3000);
+        } else {
+          log("WebSocket ditutup (mode manual via peta)");
         }
+      };
+
+      socket.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        log("error WebSocket");
       };
     }
 
@@ -322,45 +351,57 @@
         log(`ambil cuaca koordinat (${lat.toFixed(2)}, ${lon.toFixed(2)}) ...`);
         const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
         const data = await res.json();
+        console.log("DATA DARI /weather:", data);
         applyWeatherToUI(data, "manual");
-        log("mode manual (peta)");
-      } catch {
+        log("mode manual (peta) - klik lagi untuk lokasi lain");
+      } catch (e) {
+        console.error("Error fetch /weather:", e);
         log("gagal ambil data dari server");
       }
     }
 
     function initMap() {
-      const map = L.map("map").setView([-2.5, 118], 4);
+      const map = L.map("map").setView([ -2.5, 118 ], 4);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
-        attribution: "&copy; OpenStreetMap contributors",
+        attribution: '&copy; OpenStreetMap contributors'
       }).addTo(map);
 
       let marker = null;
 
       map.on("click", (e) => {
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+
         manualMode = true;
-        if (socket) socket.close();
 
-        if (!marker) marker = L.marker(e.latlng).addTo(map);
-        else marker.setLatLng(e.latlng);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
 
-        fetchWeatherForCoords(e.latlng.lat, e.latlng.lng);
+        if (marker) {
+          marker.setLatLng(e.latlng);
+        } else {
+          marker = L.marker(e.latlng).addTo(map);
+        }
+
+        fetchWeatherForCoords(lat, lon);
       });
     }
 
     window.addEventListener("load", () => {
-      connectWebSocket();
-      initMap();
+      connectWebSocket(); // mode otomatis Pontianak dulu
+      initMap();          // peta untuk pilih lokasi manual
 
-      const AUTO_MODE_DURATION_MS = 60 * 1000;
+      // === BATASI MODE OTOMATIS HANYA 1 MENIT ===
+      const AUTO_MODE_DURATION_MS = 60 * 1000; // 1 menit
       setTimeout(() => {
         if (!manualMode && socket) {
           manualMode = true;
           log("Mode otomatis selesai (1 menit). Silakan pilih lokasi di peta.");
           if (socket.readyState === WebSocket.OPEN) {
-            socket.close();
+            socket.close(); // tidak reconnect lagi karena manualMode = true
           }
         }
       }, AUTO_MODE_DURATION_MS);
