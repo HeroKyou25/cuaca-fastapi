@@ -197,7 +197,7 @@
     const iconEl = document.getElementById("weather_icon");
 
     let socket = null;
-    let manualMode = false;
+    let manualMode = false; // true kalau user sudah klik peta
 
     const historyBody = document.querySelector("#historyTable tbody");
     const MAX_HISTORY = 20;
@@ -208,6 +208,8 @@
     }
 
     function addHistoryRow(data, mode) {
+      // SESUAI PERMINTAAN: HANYA MODE OTOMATIS YANG MASUK RIWAYAT
+      if (mode !== "otomatis") return;
       if (!historyBody) return;
 
       const tr = document.createElement("tr");
@@ -240,8 +242,8 @@
       }
     }
 
-    // === ICON MAPPING: pakai weather_id biar awan beda-beda ===
-    function getIconClass(condition, code, description = "") {
+    // === ICON MAPPING: bedakan awan 800–804 ===
+    function getIconClass(condition, code) {
       if (typeof code === "number") {
         // Thunderstorm
         if (code >= 200 && code < 300) return "wi-thunderstorm";
@@ -251,18 +253,18 @@
 
         // Rain
         if (code >= 500 && code < 600) {
-          if (code === 511) return "wi-rain-mix";   // freezing rain
-          if (code >= 520) return "wi-showers";     // shower rain
+          if (code === 511) return "wi-rain-mix";
+          if (code >= 520) return "wi-showers";
           return "wi-rain";
         }
 
-        // Snow / sleet
+        // Snow
         if (code >= 600 && code < 700) {
           if (code >= 611 && code <= 622) return "wi-sleet";
           return "wi-snow";
         }
 
-        // Atmosphere (kabut, debu, dsb)
+        // Atmosphere
         if (code >= 700 && code < 800) {
           if (code === 781) return "wi-tornado";
           if (code === 771) return "wi-strong-wind";
@@ -270,22 +272,15 @@
           return "wi-dust";
         }
 
-        // Clear / Clouds
-        if (code === 800) {
-          return "wi-day-sunny"; // langit cerah
-        }
-
-        if (code > 800 && code < 900) {
-          // 801 few clouds, 802 scattered, 803 broken, 804 overcast
-          if (code === 801) return "wi-day-sunny-overcast"; // sedikit awan
-          if (code === 802) return "wi-cloud";               // awan tersebar
-          if (code === 803) return "wi-cloudy";              // awan pecah
-          if (code === 804) return "wi-cloudy-windy";        // mendung berat
-          return "wi-cloudy";
-        }
+        // Clear / Clouds detail
+        if (code === 800) return "wi-day-sunny";             // cerah
+        if (code === 801) return "wi-day-sunny-overcast";    // sedikit awan
+        if (code === 802) return "wi-cloud";                 // awan tersebar
+        if (code === 803) return "wi-cloudy";                // awan pecah
+        if (code === 804) return "wi-cloudy-windy";          // mendung berat
       }
 
-      // Fallback kalau code nggak ada
+      // fallback by main condition
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
         case "Drizzle":      return "wi-sprinkle";
@@ -307,36 +302,34 @@
       }
     }
 
-    function applyWeatherToUI(data, mode = "otomatis") {
-      const cityLabel = data.city || "Lokasi tidak diketahui";
-      cityEl.textContent = cityLabel;
+    function applyWeatherToUI(data, mode = "otomatis", extra = {}) {
+      // extra: { lat, lon } untuk fallback label manual
+      let cityLabel = data.city;
+      if (!cityLabel && extra.lat != null && extra.lon != null) {
+        cityLabel = `Lat ${extra.lat.toFixed(2)}, Lon ${extra.lon.toFixed(2)}`;
+      }
+      cityEl.textContent = cityLabel || "Lokasi tidak diketahui";
 
       if (iconEl) {
-        const cls = getIconClass(data.condition, data.condition_id, data.description);
+        const cls = getIconClass(data.condition, data.condition_id);
         iconEl.className = "wi " + cls;
       }
 
       if (data.temp !== null && data.temp !== undefined) {
         const t = typeof data.temp === "number" ? data.temp.toFixed(1) : data.temp;
         tempEl.textContent = t + "°C";
-      } else {
-        tempEl.textContent = "--°C";
-      }
+      } else tempEl.textContent = "--°C";
 
       if (data.feels_like !== null && data.feels_like !== undefined) {
         const f = typeof data.feels_like === "number"
           ? data.feels_like.toFixed(2)
           : data.feels_like;
         feelsEl.textContent = "Feels like: " + f + "°C";
-      } else {
-        feelsEl.textContent = "Feels like: --°C";
-      }
+      } else feelsEl.textContent = "Feels like: --°C";
 
       if (data.humidity !== null && data.humidity !== undefined) {
         humEl.textContent = "Humidity: " + data.humidity + "%";
-      } else {
-        humEl.textContent = "Humidity: --%";
-      }
+      } else humEl.textContent = "Humidity: --%";
 
       descEl.textContent = data.description || "-";
 
@@ -344,6 +337,7 @@
         updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
       }
 
+      // RIWAYAT: cuma otomatis
       addHistoryRow(data, mode);
     }
 
@@ -390,7 +384,8 @@
         const data = await res.json();
         console.log("DATA DARI /weather:", data);
 
-        applyWeatherToUI(data, "manual");
+        // update card (mode manual, tapi tidak masuk riwayat)
+        applyWeatherToUI(data, "manual", { lat, lon });
         log("mode manual (peta) - klik lagi untuk lokasi lain");
 
         const tempText =
@@ -400,17 +395,13 @@
                 : data.temp) + "°C"
             : "--°C";
 
-        const iconClass = getIconClass(
-          data.condition,
-          data.condition_id,
-          data.description
-        );
-
-        const cityLabel = data.city || `Lat ${lat.toFixed(2)}, Lon ${lon.toFixed(2)}`;
+        const iconClass = getIconClass(data.condition, data.condition_id);
+        const popupCity =
+          data.city || `Lat ${lat.toFixed(2)}, Lon ${lon.toFixed(2)}`;
 
         const popupHtml = `
           <div style="text-align:center;">
-            <div><strong>${cityLabel}</strong></div>
+            <div><strong>${popupCity}</strong></div>
             <div style="font-size:24px; margin:4px 0;">
               <i class="wi ${iconClass}"></i>
             </div>
@@ -429,7 +420,7 @@
     }
 
     function initMap() {
-      // 1 dunia
+      // peta 1 dunia
       const map = L.map("map").setView([0, 0], 2);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
