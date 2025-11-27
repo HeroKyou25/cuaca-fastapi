@@ -58,7 +58,7 @@ templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIGURASI CUACA ====
 
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key kamu di sini
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key di sini
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
 CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
@@ -70,8 +70,8 @@ UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))  # interval update Web
 def format_weather(data: dict) -> dict:
     """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
     try:
-        weather_main = data["weather"][0]["main"]    # contoh: "Clouds"
-        weather_id = data["weather"][0]["id"]        # contoh: 803
+        weather_main = data["weather"][0]["main"]  # contoh: "Clouds"
+        weather_id = data["weather"][0]["id"]      # contoh: 803
 
         return {
             "city": data.get("name"),
@@ -79,8 +79,8 @@ def format_weather(data: dict) -> dict:
             "feels_like": data["main"]["feels_like"],
             "description": data["weather"][0]["description"],
             "humidity": data["main"]["humidity"],
-            "condition": weather_main,               # <--- TAMBAHAN
-            "condition_id": weather_id,              # <--- TAMBAHAN
+            "condition": weather_main,               # dipakai untuk icon
+            "condition_id": weather_id,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
     except Exception as e:
