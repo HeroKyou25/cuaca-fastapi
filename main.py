@@ -7,9 +7,8 @@ import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-# ==== SQLALCHEMY (SQLite) ====
+# SQLAlchemy
 from sqlalchemy import (
     create_engine,
     Column,
@@ -34,8 +33,8 @@ class WeatherLog(Base):
     __tablename__ = "weather_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    api_called_at = Column(DateTime, index=True)  
-    mode = Column(String(20))          
+    api_called_at = Column(DateTime, index=True)
+    mode = Column(String(20))
     city = Column(String(100), nullable=True)
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)
@@ -48,67 +47,66 @@ class WeatherLog(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# =============================
-
 app = FastAPI()
 
-# folder static & templates
+# Serve index.html from project root (so visiting / shows dashboard)
+# If you prefer serving from /static, adapt accordingly.
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
-# ==== KONFIGURASI CUACA ====
-
-
-# API key: pakai ENV kalau ada, kalau tidak pakai fallback
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219" 
+# Configuration
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
-CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")   
+CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")
 COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60")) 
+# UPDATE_INTERVAL in seconds (how often server queries OpenWeather for Pontianak)
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60"))
 
-# Waktu WIB (UTC+7)
+# WIB offset
 WIB_OFFSET = timedelta(hours=7)
 
 
 def now_wib() -> datetime:
-    """Mengembalikan waktu sekarang dalam WIB."""
     return datetime.utcnow() + WIB_OFFSET
 
 
-# ============================
-
-
 def format_weather(data: dict) -> dict:
-    """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
+    """Format OpenWeather JSON to simplified dict for frontend."""
     try:
+        weather = data.get("weather", [{}])[0]
+        icon = weather.get("icon")
+        icon_url = f"https://openweathermap.org/img/wn/{icon}@2x.png" if icon else None
         return {
             "city": data.get("name"),
             "temp": data["main"]["temp"],
             "feels_like": data["main"]["feels_like"],
-            "description": data["weather"][0]["description"],
+            "description": weather.get("description"),
             "humidity": data["main"]["humidity"],
+            "icon": icon,
+            "icon_url": icon_url,
             "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
     except Exception as e:
-        print("Error format_weather:", e, "DATA:", data)
+        print("Error format_weather:", e, "DATA:", (list(data.keys()) if data else data))
         return {
             "city": data.get("name") if data else "Lokasi tidak diketahui",
             "temp": None,
             "feels_like": None,
             "description": "Tidak bisa ambil data",
             "humidity": None,
+            "icon": None,
+            "icon_url": None,
             "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
 
 
 def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
-    """Simpan rekaman pemanggilan API ke database SQLite (waktu disimpan sebagai WIB)."""
+    """Save API call to SQLite (time stored as WIB)."""
     try:
         db = SessionLocal()
         log = WeatherLog(
             mode=mode,
-            api_called_at=now_wib(),  # simpan langsung WIB
+            api_called_at=now_wib(),
             city=formatted.get("city"),
             lat=lat,
             lon=lon,
@@ -120,17 +118,28 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         )
         db.add(log)
         db.commit()
+
+        # === BATASI DATABASE MAKSIMAL 500 RECORD ===
+        MAX_RECORDS = 500
+        count = db.query(WeatherLog).count()
+        if count > MAX_RECORDS:
+            oldest = (
+                db.query(WeatherLog)
+                .order_by(WeatherLog.id.asc())
+                .first()
+            )
+            db.delete(oldest)
+            db.commit()
+        # ============================================
+
     except Exception as e:
         print("Error save_log:", e)
     finally:
         db.close()
 
 
+
 def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
-    """
-    Panggil API OpenWeather dan SELALU simpan ke DB
-    (baik otomatis maupun manual).
-    """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
         "appid": WEATHER_API_KEY,
@@ -140,11 +149,9 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     }
 
     try:
-        res = requests.get(url, params=final_params, timeout=5)
+        res = requests.get(url, params=final_params, timeout=6)
         data = res.json()
-        print("STATUS CODE:", res.status_code)
-        print("DATA DARI OPENWEATHER:", data)
-
+        print("OpenWeather status:", res.status_code, "keys:", list(data.keys()))
         if res.status_code != 200:
             msg = data.get("message", "Gagal ambil data dari API cuaca")
             formatted = {
@@ -153,6 +160,8 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
                 "feels_like": None,
                 "description": f"Gagal ambil data: {msg}",
                 "humidity": None,
+                "icon": None,
+                "icon_url": None,
                 "updated_at": now_wib().strftime("%H:%M:%S WIB"),
             }
             save_log(mode, data, formatted, lat=lat, lon=lon)
@@ -170,6 +179,8 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "feels_like": None,
             "description": "Tidak bisa terhubung ke server cuaca",
             "humidity": None,
+            "icon": None,
+            "icon_url": None,
             "updated_at": now_wib().strftime("%H:%M:%S WIB"),
         }
         save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
@@ -177,76 +188,61 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
 
 
 def get_weather_default() -> dict:
-    """Cuaca default berbasis nama kota (untuk WebSocket, mode otomatis)."""
-    return _call_openweather(
-        {"q": f"{CITY},{COUNTRY_CODE}"},
-        mode="otomatis",
-    )
+    """Default weather for Pontianak (used by WebSocket broadcaster)."""
+    return _call_openweather({"q": f"{CITY},{COUNTRY_CODE}"}, mode="otomatis")
 
 
 def get_weather_by_coords(lat: float, lon: float) -> dict:
-    """Cuaca berdasarkan koordinat lat/lon (mode manual / klik peta)."""
-    return _call_openweather(
-        {"lat": lat, "lon": lon},
-        mode="manual",
-        lat=lat,
-        lon=lon,
-    )
+    """Weather by coordinates for map lookup (manual, does NOT affect dashboard)."""
+    return _call_openweather({"lat": lat, "lon": lon}, mode="manual", lat=lat, lon=lon)
 
+
+from fastapi.templating import Jinja2Templates
+
+templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Halaman utama: render templates/index.html."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+# WebSocket clients registry
+clients = set()
+
+
 @app.websocket("/ws")
-async def ws(websocket: WebSocket):
-    """
-    WebSocket: kirim data cuaca default berkala ke client.
-    Dipakai untuk mode otomatis (kota default).
-    Interval diatur oleh UPDATE_INTERVAL (detik).
-    """
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    clients.add(websocket)
     try:
         while True:
-            weather = get_weather_default()
-            await websocket.send_json(weather)
-            await asyncio.sleep(UPDATE_INTERVAL)
+            # We'll keep the connection alive; server pushes updates periodically.
+            # WebSocket receive is optional; do a short receive to detect client closure.
+            await websocket.receive_text()
     except WebSocketDisconnect:
         print("WebSocket client disconnected.")
     except Exception as e:
-        print("WebSocket closed by error:", e)
+        print("WebSocket error:", e)
     finally:
-        await websocket.close()
+        clients.discard(websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.get("/weather", response_class=JSONResponse)
 async def weather_endpoint(lat: float, lon: float):
-    """
-    Endpoint HTTP biasa:
-    /weather?lat=...&lon=...
-    Dipanggil saat user klik peta.
-    """
+    """HTTP endpoint used by map lookups."""
     weather = get_weather_by_coords(lat, lon)
     return JSONResponse(content=weather)
 
 
-# ========= ENDPOINT LIHAT LOG SEBAGAI JSON =========
-
 @app.get("/logs", response_class=JSONResponse)
 async def get_logs(limit: int = 50):
-    """
-    Lihat rekapan pemanggilan API cuaca (JSON).
-    """
     db = SessionLocal()
     try:
-        rows = (
-            db.query(WeatherLog)
-            .order_by(WeatherLog.id.desc())
-            .limit(limit)
-            .all()
-        )
+        rows = db.query(WeatherLog).order_by(WeatherLog.id.desc()).limit(limit).all()
         result = []
         for r in rows:
             result.append(
@@ -268,143 +264,26 @@ async def get_logs(limit: int = 50):
         db.close()
 
 
-# ========= ENDPOINT LIHAT LOG DALAM BENTUK DUA TABEL HTML =========
+# Background broadcaster coroutine
+async def broadcaster_loop():
+    while True:
+        try:
+            data = get_weather_default()
+            if data:
+                disconnected = []
+                for ws in list(clients):
+                    try:
+                        await ws.send_json(data)
+                    except Exception:
+                        disconnected.append(ws)
+                for ws in disconnected:
+                    clients.discard(ws)
+        except Exception as e:
+            print("Broadcaster loop error:", e)
+        await asyncio.sleep(UPDATE_INTERVAL)
 
-@app.get("/logs-view", response_class=HTMLResponse)
-async def logs_view(limit: int = 50):
-    """
-    Viewer HTML sederhana untuk melihat log:
-    - Tabel 1: mode otomatis
-    - Tabel 2: mode manual
-    """
-    db = SessionLocal()
-    try:
-        auto_rows = (
-            db.query(WeatherLog)
-            .filter(WeatherLog.mode == "otomatis")
-            .order_by(WeatherLog.id.desc())
-            .limit(limit)
-            .all()
-        )
-        manual_rows = (
-            db.query(WeatherLog)
-            .filter(WeatherLog.mode == "manual")
-            .order_by(WeatherLog.id.desc())
-            .limit(limit)
-            .all()
-        )
 
-        def build_rows(rows):
-            html = ""
-            for r in rows:
-                html += f"""
-                <tr>
-                  <td>{r.id}</td>
-                  <td>{r.api_called_at.strftime('%Y-%m-%d %H:%M:%S WIB')}</td>
-                  <td>{r.city or ""}</td>
-                  <td>{r.lat or ""}</td>
-                  <td>{r.lon or ""}</td>
-                  <td>{r.temp or ""}</td>
-                  <td>{r.feels_like or ""}</td>
-                  <td>{r.humidity or ""}</td>
-                  <td>{r.description or ""}</td>
-                </tr>
-                """
-            return html
-
-        auto_rows_html = build_rows(auto_rows)
-        manual_rows_html = build_rows(manual_rows)
-
-        html = f"""
-        <!DOCTYPE html>
-        <html lang="id">
-        <head>
-          <meta charset="utf-8" />
-          <title>Log Pemanggilan API Cuaca</title>
-          <style>
-            body {{
-              font-family: Arial, sans-serif;
-              background: #f5f5f5;
-              padding: 20px;
-            }}
-            h1 {{
-              margin-bottom: 4px;
-            }}
-            h2 {{
-              margin-top: 24px;
-              margin-bottom: 8px;
-            }}
-            table {{
-              border-collapse: collapse;
-              width: 100%;
-              background: #fff;
-              border-radius: 8px;
-              overflow: hidden;
-              box-shadow: 0 3px 8px rgba(0,0,0,0.1);
-              font-size: 0.9rem;
-              margin-bottom: 16px;
-            }}
-            thead {{
-              background: #f0f0f0;
-            }}
-            th, td {{
-              padding: 6px 8px;
-              border-bottom: 1px solid #e0e0e0;
-              text-align: left;
-            }}
-            tr:nth-child(even) td {{
-              background: #fafafa;
-            }}
-          </style>
-        </head>
-        <body>
-          <h1>Log Pemanggilan API Cuaca</h1>
-          <p>Waktu pada tabel sudah dikonversi ke WIB. Menampilkan maks {limit} data terakhir per mode.</p>
-
-          <h2>Mode Otomatis (WebSocket, kota default)</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Waktu (WIB)</th>
-                <th>Kota</th>
-                <th>Lat</th>
-                <th>Lon</th>
-                <th>Temp</th>
-                <th>Feels Like</th>
-                <th>Humidity</th>
-                <th>Deskripsi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auto_rows_html}
-            </tbody>
-          </table>
-
-          <h2>Mode Manual (klik peta)</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Waktu (WIB)</th>
-                <th>Kota</th>
-                <th>Lat</th>
-                <th>Lon</th>
-                <th>Temp</th>
-                <th>Feels Like</th>
-                <th>Humidity</th>
-                <th>Deskripsi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {manual_rows_html}
-            </tbody>
-          </table>
-        </body>
-        </html>
-        """
-
-        return HTMLResponse(content=html)
-    finally:
-        db.close()
-
+# Start background task when app starts
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(broadcaster_loop())
