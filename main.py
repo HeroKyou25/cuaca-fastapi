@@ -70,23 +70,29 @@ UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))  # interval update Web
 def format_weather(data: dict) -> dict:
     """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
     try:
-        weather_main = data["weather"][0]["main"]  # contoh: "Clouds"
-        weather_id = data["weather"][0]["id"]      # contoh: 803
+        weather_main = data["weather"][0]["main"]   # contoh: "Clouds"
+        weather_id = data["weather"][0]["id"]       # contoh: 803
+        name = data.get("name")
+        sys_country = (data.get("sys") or {}).get("country")
+        city_label = name or ""
+
+        if city_label and sys_country:
+            city_label = f"{city_label}, {sys_country}"
 
         return {
-            "city": data.get("name"),
+            "city": city_label or None,
             "temp": data["main"]["temp"],
             "feels_like": data["main"]["feels_like"],
             "description": data["weather"][0]["description"],
             "humidity": data["main"]["humidity"],
-            "condition": weather_main,               # dipakai untuk icon
+            "condition": weather_main,
             "condition_id": weather_id,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
     except Exception as e:
         print("Error format_weather:", e, "DATA:", data)
         return {
-            "city": data.get("name") if data else "Lokasi tidak diketahui",
+            "city": None,
             "temp": None,
             "feels_like": None,
             "description": "Tidak bisa ambil data",
@@ -121,6 +127,18 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db.close()
 
 
+def _apply_city_fallback(formatted: dict, lat, lon, default_city_text: str):
+    """
+    Kalau city kosong, isi minimal dengan koordinat atau teks default.
+    """
+    if not formatted.get("city"):
+        if lat is not None and lon is not None:
+            formatted["city"] = f"Lat {lat:.2f}, Lon {lon:.2f}"
+        else:
+            formatted["city"] = default_city_text
+    return formatted
+
+
 def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     """
     Panggil API OpenWeather dan SELALU simpan ke DB
@@ -143,7 +161,7 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
         if res.status_code != 200:
             msg = data.get("message", "Gagal ambil data dari API cuaca")
             formatted = {
-                "city": data.get("name") or "Lokasi tidak diketahui",
+                "city": None,
                 "temp": None,
                 "feels_like": None,
                 "description": f"Gagal ambil data: {msg}",
@@ -152,17 +170,23 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
                 "condition_id": None,
                 "updated_at": datetime.now().strftime("%H:%M:%S"),
             }
+            formatted = _apply_city_fallback(
+                formatted, lat, lon, "Lokasi tidak diketahui"
+            )
             save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
 
         formatted = format_weather(data)
+        formatted = _apply_city_fallback(
+            formatted, lat, lon, "Lokasi tidak diketahui"
+        )
         save_log(mode, data, formatted, lat=lat, lon=lon)
         return formatted
 
     except requests.RequestException as e:
         print("Error saat memanggil OpenWeather:", e)
         formatted = {
-            "city": "Lokasi tidak diketahui",
+            "city": None,
             "temp": None,
             "feels_like": None,
             "description": "Tidak bisa terhubung ke server cuaca",
@@ -171,6 +195,9 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "condition_id": None,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
+        formatted = _apply_city_fallback(
+            formatted, lat, lon, "Lokasi tidak diketahui"
+        )
         save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
 
