@@ -93,8 +93,6 @@
       max-width: 800px;
     }
 
-    /* ====== RIWAYAT CUACA ====== */
-
     .history-container {
       width: 90%;
       max-width: 800px;
@@ -169,7 +167,6 @@
         </tr>
       </thead>
       <tbody>
-        <!-- baris riwayat akan ditambahkan dari JS -->
       </tbody>
     </table>
   </div>
@@ -200,9 +197,8 @@
     const iconEl = document.getElementById("weather_icon");
 
     let socket = null;
-    let manualMode = false; // true kalau user sudah klik peta
+    let manualMode = false;
 
-    // RIWAYAT
     const historyBody = document.querySelector("#historyTable tbody");
     const MAX_HISTORY = 20;
 
@@ -244,45 +240,52 @@
       }
     }
 
-    // === MAPPING KONDISI -> ICON WEATHER ICONS (lebih detail by weather_id) ===
+    // === ICON MAPPING: pakai weather_id biar awan beda-beda ===
     function getIconClass(condition, code, description = "") {
-      // kalau ada kode (id) pakai ini dulu
       if (typeof code === "number") {
-        if (code >= 200 && code < 300) {
-          // Thunderstorm
-          return "wi-thunderstorm";
-        } else if (code >= 300 && code < 400) {
-          // Drizzle
-          return "wi-sprinkle";
-        } else if (code >= 500 && code < 600) {
-          // Rain
-          if (code === 511) return "wi-rain-mix";    // freezing rain
-          if (code >= 520) return "wi-showers";      // shower rain
+        // Thunderstorm
+        if (code >= 200 && code < 300) return "wi-thunderstorm";
+
+        // Drizzle
+        if (code >= 300 && code < 400) return "wi-sprinkle";
+
+        // Rain
+        if (code >= 500 && code < 600) {
+          if (code === 511) return "wi-rain-mix";   // freezing rain
+          if (code >= 520) return "wi-showers";     // shower rain
           return "wi-rain";
-        } else if (code >= 600 && code < 700) {
-          // Snow / sleet
+        }
+
+        // Snow / sleet
+        if (code >= 600 && code < 700) {
           if (code >= 611 && code <= 622) return "wi-sleet";
           return "wi-snow";
-        } else if (code >= 700 && code < 800) {
-          // Atmosphere: mist, smoke, haze, fog, dust, sand, ash, squall, tornado
+        }
+
+        // Atmosphere (kabut, debu, dsb)
+        if (code >= 700 && code < 800) {
           if (code === 781) return "wi-tornado";
           if (code === 771) return "wi-strong-wind";
           if (code === 741) return "wi-fog";
-          // sisanya: kabut / debu
           return "wi-dust";
-        } else if (code === 800) {
-          // Clear
-          return "wi-day-sunny";
-        } else if (code > 800 && code < 900) {
-          // Clouds 80x
-          if (code === 801) return "wi-day-sunny-overcast"; // few clouds
-          if (code === 802) return "wi-cloud";               // scattered
-          if (code === 803 || code === 804) return "wi-cloudy"; // broken / overcast
+        }
+
+        // Clear / Clouds
+        if (code === 800) {
+          return "wi-day-sunny"; // langit cerah
+        }
+
+        if (code > 800 && code < 900) {
+          // 801 few clouds, 802 scattered, 803 broken, 804 overcast
+          if (code === 801) return "wi-day-sunny-overcast"; // sedikit awan
+          if (code === 802) return "wi-cloud";               // awan tersebar
+          if (code === 803) return "wi-cloudy";              // awan pecah
+          if (code === 804) return "wi-cloudy-windy";        // mendung berat
           return "wi-cloudy";
         }
       }
 
-      // fallback kalau gak ada code / tidak cocok
+      // Fallback kalau code nggak ada
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
         case "Drizzle":      return "wi-sprinkle";
@@ -305,9 +308,9 @@
     }
 
     function applyWeatherToUI(data, mode = "otomatis") {
-      cityEl.textContent = data.city || "Lokasi tidak diketahui";
+      const cityLabel = data.city || "Lokasi tidak diketahui";
+      cityEl.textContent = cityLabel;
 
-      // ICON di kartu (pakai condition + condition_id)
       if (iconEl) {
         const cls = getIconClass(data.condition, data.condition_id, data.description);
         iconEl.className = "wi " + cls;
@@ -354,10 +357,7 @@
       };
 
       socket.onmessage = (event) => {
-        if (manualMode) {
-          // kalau sudah klik peta, abaikan data dari WebSocket
-          return;
-        }
+        if (manualMode) return;
         try {
           const data = JSON.parse(event.data);
           console.log("DATA DARI WS:", data);
@@ -390,11 +390,9 @@
         const data = await res.json();
         console.log("DATA DARI /weather:", data);
 
-        // UPDATE CARD + RIWAYAT
         applyWeatherToUI(data, "manual");
         log("mode manual (peta) - klik lagi untuk lokasi lain");
 
-        // === BUAT POPUP DI ATAS MARKER ===
         const tempText =
           data.temp !== null && data.temp !== undefined
             ? (typeof data.temp === "number"
@@ -402,11 +400,17 @@
                 : data.temp) + "°C"
             : "--°C";
 
-        const iconClass = getIconClass(data.condition, data.condition_id, data.description);
+        const iconClass = getIconClass(
+          data.condition,
+          data.condition_id,
+          data.description
+        );
+
+        const cityLabel = data.city || `Lat ${lat.toFixed(2)}, Lon ${lon.toFixed(2)}`;
 
         const popupHtml = `
           <div style="text-align:center;">
-            <div><strong>${data.city || "Lokasi tidak diketahui"}</strong></div>
+            <div><strong>${cityLabel}</strong></div>
             <div style="font-size:24px; margin:4px 0;">
               <i class="wi ${iconClass}"></i>
             </div>
@@ -425,7 +429,7 @@
     }
 
     function initMap() {
-      // === 1 DUNIA: mulai dari view global ===
+      // 1 dunia
       const map = L.map("map").setView([0, 0], 2);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -441,35 +445,31 @@
 
         manualMode = true;
 
-        // tutup WebSocket kalau masih hidup
         if (socket && socket.readyState === WebSocket.OPEN) {
           socket.close();
         }
 
-        // kalau marker sudah ada, pindahkan; kalau belum, buat baru
         if (marker) {
           marker.setLatLng(e.latlng);
         } else {
           marker = L.marker(e.latlng).addTo(map);
         }
 
-        // ambil cuaca dan update popup + card
         fetchWeatherForCoords(lat, lon, marker);
       });
     }
 
     window.addEventListener("load", () => {
-      connectWebSocket(); // mode otomatis Pontianak dulu
-      initMap();          // peta untuk pilih lokasi manual
+      connectWebSocket();
+      initMap();
 
-      // === BATASI MODE OTOMATIS HANYA 1 MENIT ===
-      const AUTO_MODE_DURATION_MS = 60 * 1000; // 1 menit
+      const AUTO_MODE_DURATION_MS = 60 * 1000;
       setTimeout(() => {
         if (!manualMode && socket) {
           manualMode = true;
           log("Mode otomatis selesai (1 menit). Silakan pilih lokasi di peta.");
           if (socket.readyState === WebSocket.OPEN) {
-            socket.close(); // tidak reconnect lagi karena manualMode = true
+            socket.close();
           }
         }
       }, AUTO_MODE_DURATION_MS);
