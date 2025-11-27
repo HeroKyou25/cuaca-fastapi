@@ -8,16 +8,16 @@
   <!-- Leaflet CSS (peta) -->
   <link
     rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css"
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
   />
 
   <!-- Weather Icons -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
+    href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
   />
 
   <style>
@@ -136,9 +136,12 @@
   <div class="card">
     <h1>Cuaca Real-time</h1>
     <div class="city" id="city">Mengambil data...</div>
+
+    <!-- ICON CUACA DI CARD -->
     <div style="margin: 6px 0;">
       <i id="weather_icon" class="wi wi-na" style="font-size: 48px;"></i>
     </div>
+
     <div class="temp" id="temp">--°C</div>
     <div class="desc" id="description">-</div>
 
@@ -241,6 +244,7 @@
       }
     }
 
+    // === MAPPING KONDISI -> ICON WEATHER ICONS ===
     function getIconClass(condition) {
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
@@ -266,7 +270,7 @@
     function applyWeatherToUI(data, mode = "otomatis") {
       cityEl.textContent = data.city || "Lokasi tidak diketahui";
 
-      // set icon kalau ada condition
+      // ICON di kartu
       if (iconEl) {
         const cls = getIconClass(data.condition);
         iconEl.className = "wi " + cls;
@@ -342,14 +346,41 @@
       };
     }
 
-    async function fetchWeatherForCoords(lat, lon) {
+    async function fetchWeatherForCoords(lat, lon, marker) {
       try {
         log(`ambil cuaca koordinat (${lat.toFixed(2)}, ${lon.toFixed(2)}) ...`);
         const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
         const data = await res.json();
         console.log("DATA DARI /weather:", data);
+
+        // UPDATE CARD + RIWAYAT
         applyWeatherToUI(data, "manual");
         log("mode manual (peta) - klik lagi untuk lokasi lain");
+
+        // === BUAT POPUP DI ATAS MARKER ===
+        const tempText =
+          data.temp !== null && data.temp !== undefined
+            ? (typeof data.temp === "number"
+                ? data.temp.toFixed(1)
+                : data.temp) + "°C"
+            : "--°C";
+
+        const iconClass = getIconClass(data.condition);
+
+        const popupHtml = `
+          <div style="text-align:center;">
+            <div><strong>${data.city || "Lokasi tidak diketahui"}</strong></div>
+            <div style="font-size:24px; margin:4px 0;">
+              <i class="wi ${iconClass}"></i>
+            </div>
+            <div style="font-size:12px;">${data.description || "-"}</div>
+            <div style="font-size:12px;">${tempText}</div>
+          </div>
+        `;
+
+        if (marker) {
+          marker.bindPopup(popupHtml).openPopup();
+        }
       } catch (e) {
         console.error("Error fetch /weather:", e);
         log("gagal ambil data dari server");
@@ -357,11 +388,11 @@
     }
 
     function initMap() {
-      const map = L.map("map").setView([ -2.5, 118 ], 4);
+      const map = L.map("map").setView([-2.5, 118], 4);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
-        attribution: '&copy; OpenStreetMap contributors'
+        attribution: "&copy; OpenStreetMap contributors",
       }).addTo(map);
 
       let marker = null;
@@ -372,17 +403,20 @@
 
         manualMode = true;
 
+        // tutup WebSocket kalau masih hidup
         if (socket && socket.readyState === WebSocket.OPEN) {
           socket.close();
         }
 
+        // kalau marker sudah ada, pindahkan; kalau belum, buat baru
         if (marker) {
           marker.setLatLng(e.latlng);
         } else {
           marker = L.marker(e.latlng).addTo(map);
         }
 
-        fetchWeatherForCoords(lat, lon);
+        // ambil cuaca dan update popup + card
+        fetchWeatherForCoords(lat, lon, marker);
       });
     }
 
