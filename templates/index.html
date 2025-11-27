@@ -2,53 +2,190 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <title>Cuaca Real-time - Pontianak</title>
+  <title>Cuaca Real-time dengan Peta</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+
+  <!-- Leaflet CSS (peta) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+
+  <!-- Weather Icons -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css"
+    integrity="sha512-XN9Q9jzVv0Yg0v7lCMTAvF/ZSYq3dYt+vvwf8alQDTvrHnFqUPgwjTZKZz2ztF0qJ5aKxN1L5/8sY5VYB9r4Pg=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+  />
+
   <style>
-    body { font-family: Arial, sans-serif; background:#f5f5f5; margin:0; padding:20px; display:flex; flex-direction:column; align-items:center; }
-    .card { background:#fff; padding:18px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.08); width:360px; margin-bottom:16px; text-align:center; }
-    .city { font-weight:700; margin-bottom:6px; }
-    .temp { font-size:2.6rem; margin:8px 0; }
-    .desc { text-transform:capitalize; margin-bottom:6px; }
-    .meta { font-size:0.9rem; color:#555; margin-bottom:6px; }
-    #map { width:90%; max-width:1000px; height:420px; border-radius:10px; margin-top:12px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
-    .history-container { width:90%; max-width:1000px; background:#fff; border-radius:10px; padding:12px; margin-top:12px; box-shadow:0 4px 12px rgba(0,0,0,0.04); }
-    table { width:100%; border-collapse:collapse; font-size:0.9rem; }
-    th, td { padding:6px 8px; border-bottom:1px solid #eee; text-align:left; }
-    thead { background:#fafafa; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: #ffffff;
+      padding: 20px 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 320px;
+      text-align: center;
+      margin-top: 30px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 10px;
+    }
+
+    .city {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .temp {
+      font-size: 2.6rem;
+      margin: 10px 0;
+    }
+
+    .desc {
+      text-transform: capitalize;
+      margin-bottom: 10px;
+    }
+
+    .meta {
+      font-size: 0.9rem;
+      color: #555;
+      margin-bottom: 6px;
+    }
+
+    .debug {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #777;
+    }
+
+    #map {
+      width: 90%;
+      max-width: 800px;
+      height: 400px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+      margin-bottom: 30px;
+      background: #ddd;
+    }
+
+    .note {
+      font-size: 0.85rem;
+      color: #555;
+      margin-bottom: 10px;
+      text-align: center;
+      max-width: 800px;
+    }
+
+    /* ====== RIWAYAT CUACA ====== */
+
+    .history-container {
+      width: 90%;
+      max-width: 800px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+
+    .history-container h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.1rem;
+    }
+
+    #historyTable {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    #historyTable thead {
+      background: #f1f1f1;
+    }
+
+    #historyTable th,
+    #historyTable td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #e0e0e0;
+      text-align: left;
+    }
+
+    #historyTable tbody tr:nth-child(even) {
+      background: #fafafa;
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Cuaca Real-time — Kota Pontianak</h2>
+    <h1>Cuaca Real-time</h1>
     <div class="city" id="city">Mengambil data...</div>
+
+    <!-- ICON CUACA -->
+    <div>
+      <i id="weather_icon" class="wi" style="font-size: 48px;"></i>
+    </div>
+
     <div class="temp" id="temp">--°C</div>
     <div class="desc" id="description">-</div>
+
     <div class="meta">
-      <div id="feels_like">Feels like: --°C</div>
-      <div id="humidity">Humidity: --%</div>
-      <div id="updated_at">Terakhir update: -</div>
+      <span id="feels_like">Feels like: --°C</span><br />
+      <span id="humidity">Humidity: --%</span><br />
+      <span id="updated_at">Terakhir update: -</span>
     </div>
-    <div id="status" style="font-size:0.85rem;color:#666;">Status: inisialisasi...</div>
+
+    <div class="debug" id="debug">Status: inisialisasi...</div>
   </div>
 
+  <!-- RIWAYAT CUACA -->
   <div class="history-container">
-    <h3>Riwayat Cuaca Kota Pontianak</h3>
+    <h2>Riwayat Cuaca</h2>
     <table id="historyTable">
       <thead>
-        <tr><th>Waktu</th><th>Kota</th><th>Suhu</th><th>Deskripsi</th><th>Kelembapan</th></tr>
+        <tr>
+          <th>Waktu</th>
+          <th>Mode</th>
+          <th>Kota</th>
+          <th>Suhu</th>
+          <th>Deskripsi</th>
+          <th>Kelembapan</th>
+        </tr>
       </thead>
-      <tbody></tbody>
+      <tbody>
+      </tbody>
     </table>
   </div>
 
-  <p style="width:90%; max-width:1000px; color:#444; margin:10px 0 6px 0;">
-    📍 Peta (OpenStreetMap). Klik peta untuk menambah marker dan melihat cuaca di lokasi itu. Marker hanya untuk lookup — dashboard tetap Pontianak.
+  <p class="note">
+    📍 Peta (OpenStreetMap). Klik peta untuk menambah marker dan melihat cuaca di lokasi itu.
   </p>
+
   <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
+
   <script>
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const wsUrl = wsProtocol + "://" + window.location.host + "/ws";
@@ -59,131 +196,174 @@
     const feelsEl = document.getElementById("feels_like");
     const humEl = document.getElementById("humidity");
     const updatedAtEl = document.getElementById("updated_at");
-    const statusEl = document.getElementById("status");
+    const debugEl = document.getElementById("debug");
+    const iconEl = document.getElementById("weather_icon");
 
-    // history table (Pontianak only)
+    let socket = null;
+    let manualMode = false;
+
     const historyBody = document.querySelector("#historyTable tbody");
-    const MAX_HISTORY = 10;
+    const MAX_HISTORY = 20;
 
-    function log(s) {
-      console.log(s);
-      statusEl.textContent = "Status: " + s;
+    function log(msg) {
+      console.log(msg);
+      debugEl.textContent = "Status: " + msg;
     }
 
-    function addHistoryRow(data) {
+    function addHistoryRow(data, mode) {
       const tr = document.createElement("tr");
-      const tempText = data.temp !== null && data.temp !== undefined ? (typeof data.temp === "number" ? data.temp.toFixed(1) + "°C" : data.temp) : "--°C";
-      const humText = data.humidity !== null && data.humidity !== undefined ? data.humidity + "%" : "--%";
-      tr.innerHTML = `<td>${data.updated_at || '-'}</td><td>${data.city || 'Pontianak'}</td><td>${tempText}</td><td>${data.description || '-'}</td><td>${humText}</td>`;
+
+      const tempText =
+        data.temp !== null && data.temp !== undefined
+          ? (typeof data.temp === "number"
+              ? data.temp.toFixed(1)
+              : data.temp) + "°C"
+          : "--°C";
+
+      const humText =
+        data.humidity !== null && data.humidity !== undefined
+          ? data.humidity + "%"
+          : "--%";
+
+      tr.innerHTML = `
+        <td>${data.updated_at || "-"}</td>
+        <td>${mode}</td>
+        <td>${data.city || "?"}</td>
+        <td>${tempText}</td>
+        <td>${data.description || "-"}</td>
+        <td>${humText}</td>
+      `;
+
       historyBody.prepend(tr);
-      while (historyBody.rows.length > MAX_HISTORY) historyBody.deleteRow(-1);
+      while (historyBody.rows.length > MAX_HISTORY) {
+        historyBody.deleteRow(-1);
+      }
     }
 
-    function applyWeatherToUI(data) {
-      cityEl.textContent = data.city || "Pontianak";
+    function getIconClass(condition) {
+      switch (condition) {
+        case "Thunderstorm": return "wi-thunderstorm";
+        case "Drizzle": return "wi-sprinkle";
+        case "Rain": return "wi-rain";
+        case "Snow": return "wi-snow";
+        case "Mist":
+        case "Smoke":
+        case "Haze":
+        case "Dust":
+        case "Fog":
+        case "Sand":
+        case "Ash":
+        case "Squall":
+          return "wi-fog";
+        case "Tornado": return "wi-tornado";
+        case "Clouds": return "wi-cloudy";
+        case "Clear": return "wi-day-sunny";
+        default: return "wi-na";
+      }
+    }
+
+    function applyWeatherToUI(data, mode = "otomatis") {
+      cityEl.textContent = data.city || "Lokasi tidak diketahui";
+
+      // ICON
+      if (iconEl) {
+        const cls = getIconClass(data.condition);
+        iconEl.className = "wi " + cls;
+      }
+
       if (data.temp !== null && data.temp !== undefined) {
-        tempEl.textContent = (typeof data.temp === "number" ? data.temp.toFixed(1) : data.temp) + "°C";
+        const t = typeof data.temp === "number" ? data.temp.toFixed(1) : data.temp;
+        tempEl.textContent = t + "°C";
       } else tempEl.textContent = "--°C";
 
-      descEl.textContent = data.description || "-";
-      feelsEl.textContent = "Feels like: " + (data.feels_like !== null ? (typeof data.feels_like === "number" ? data.feels_like.toFixed(1) + "°C" : data.feels_like) : "--°C");
-      humEl.textContent = "Humidity: " + (data.humidity !== null ? data.humidity + "%" : "--%");
-      if (data.updated_at) updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
+      if (data.feels_like !== null && data.feels_like !== undefined) {
+        const f = typeof data.feels_like === "number"
+          ? data.feels_like.toFixed(2)
+          : data.feels_like;
+        feelsEl.textContent = "Feels like: " + f + "°C";
+      } else feelsEl.textContent = "Feels like: --°C";
 
-      addHistoryRow(data);
+      if (data.humidity !== null && data.humidity !== undefined) {
+        humEl.textContent = "Humidity: " + data.humidity + "%";
+      } else humEl.textContent = "Humidity: --%";
+
+      descEl.textContent = data.description || "-";
+
+      if (data.updated_at) {
+        updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
+      }
+
+      addHistoryRow(data, mode);
     }
 
-    // WebSocket — Pontianak broadcasts
-    let socket = null;
     function connectWebSocket() {
-      log("menghubungkan WebSocket untuk Pontianak...");
+      log("menghubungkan WebSocket (mode otomatis Pontianak)...");
+
       socket = new WebSocket(wsUrl);
 
-      socket.onopen = () => log("WebSocket terhubung ✅ (Pontianak)");
+      socket.onopen = () => log("WebSocket terhubung ✅ (mode otomatis)");
+
       socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log("WS DATA:", data);
-          applyWeatherToUI(data);
-        } catch (e) {
-          console.error(e);
-          log("gagal parsing data dari WebSocket");
+        if (manualMode) return;
+        const data = JSON.parse(event.data);
+        applyWeatherToUI(data, "otomatis");
+      };
+
+      socket.onclose = () => {
+        if (!manualMode) {
+          log("koneksi putus, mencoba ulang...");
+          setTimeout(connectWebSocket, 3000);
         }
       };
-      socket.onclose = () => {
-        log("koneksi WebSocket putus, mencoba reconnect dalam 3 detik...");
-        setTimeout(connectWebSocket, 3000);
-      };
-      socket.onerror = (err) => {
-        console.error("WS error:", err);
-        log("error WebSocket");
-      };
     }
-    connectWebSocket();
-
-    // Map setup (marker per-click)
-    const map = L.map("map").setView([-2.5, 118], 4);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
-
-    let lastMarker = null;
 
     async function fetchWeatherForCoords(lat, lon) {
       try {
-        log(`ambil cuaca koordinat (${lat.toFixed(3)}, ${lon.toFixed(3)}) ...`);
+        log(`ambil cuaca koordinat (${lat.toFixed(2)}, ${lon.toFixed(2)}) ...`);
         const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
         const data = await res.json();
-        return data;
-      } catch (e) {
-        console.error("Error fetch /weather:", e);
-        log("gagal ambil data dari server (map)");
-        return null;
+        applyWeatherToUI(data, "manual");
+        log("mode manual (peta)");
+      } catch {
+        log("gagal ambil data dari server");
       }
     }
 
-    map.on("click", async (e) => {
-      const lat = e.latlng.lat;
-      const lon = e.latlng.lng;
+    function initMap() {
+      const map = L.map("map").setView([-2.5, 118], 4);
 
-      const data = await fetchWeatherForCoords(lat, lon);
-      if (!data) return;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
 
-      // place or move marker
-      if (lastMarker) {
-        lastMarker.setLatLng(e.latlng);
-      } else {
-        lastMarker = L.marker(e.latlng).addTo(map);
-      }
+      let marker = null;
 
-      const city = data.city || "Lokasi";
-      const desc = data.description || "-";
-      const temp = (data.temp !== null && data.temp !== undefined) ? (typeof data.temp === "number" ? data.temp.toFixed(1) + "°C" : data.temp) : "--°C";
-      const iconUrl = data.icon_url || (data.icon ? `https://openweathermap.org/img/wn/${data.icon}@2x.png` : null);
+      map.on("click", (e) => {
+        manualMode = true;
+        if (socket) socket.close();
 
-      // build popup content
-      const content = document.createElement("div");
-      content.style.textAlign = "center";
-      const title = document.createElement("div");
-      title.style.fontWeight = "700";
-      title.textContent = city;
-      content.appendChild(title);
+        if (!marker) marker = L.marker(e.latlng).addTo(map);
+        else marker.setLatLng(e.latlng);
 
-      if (iconUrl) {
-        const img = document.createElement("img");
-        img.src = iconUrl;
-        img.alt = desc;
-        img.style.width = "64px";
-        img.style.height = "64px";
-        img.style.display = "block";
-        img.style.margin = "6px auto";
-        content.appendChild(img);
-      }
+        fetchWeatherForCoords(e.latlng.lat, e.latlng.lng);
+      });
+    }
 
-      const p = document.createElement("div");
-      p.innerHTML = `${temp}<br>${desc}`;
-      content.appendChild(p);
+    window.addEventListener("load", () => {
+      connectWebSocket();
+      initMap();
 
-      lastMarker.bindPopup(content).openPopup();
-      log("Popup peta ditampilkan (lookup cepat).");
+      const AUTO_MODE_DURATION_MS = 60 * 1000;
+      setTimeout(() => {
+        if (!manualMode && socket) {
+          manualMode = true;
+          log("Mode otomatis selesai (1 menit). Silakan pilih lokasi di peta.");
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+        }
+      }, AUTO_MODE_DURATION_MS);
     });
   </script>
 </body>
