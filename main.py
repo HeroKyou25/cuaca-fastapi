@@ -56,31 +56,27 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# ==== KONFIGURASI CUACA ====
-
-FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"  # <-- API key kamu
+# ==== KONFIG CUACA ====
+FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
-CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk mode WebSocket
-COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")  # kode negara
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))  # interval update WebSocket (detik)
-# ============================
+CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")
+COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))
+# =======================
 
 
 def format_weather(data: dict) -> dict:
-    """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
+    """
+    Format JSON dari OpenWeather ke bentuk sederhana untuk frontend.
+    Mirip versi awalmu, ditambah condition + condition_id.
+    """
     try:
-        weather_main = data["weather"][0]["main"]   # contoh: "Clouds"
-        weather_id = data["weather"][0]["id"]       # contoh: 803
-        name = data.get("name")
-        sys_country = (data.get("sys") or {}).get("country")
-        city_label = name or ""
-
-        if city_label and sys_country:
-            city_label = f"{city_label}, {sys_country}"
+        weather_main = data["weather"][0]["main"]   # ex: "Clouds"
+        weather_id = data["weather"][0]["id"]       # ex: 803
 
         return {
-            "city": city_label or None,
+            "city": data.get("name"),
             "temp": data["main"]["temp"],
             "feels_like": data["main"]["feels_like"],
             "description": data["weather"][0]["description"],
@@ -92,7 +88,7 @@ def format_weather(data: dict) -> dict:
     except Exception as e:
         print("Error format_weather:", e, "DATA:", data)
         return {
-            "city": None,
+            "city": data.get("name") if data else "Lokasi tidak diketahui",
             "temp": None,
             "feels_like": None,
             "description": "Tidak bisa ambil data",
@@ -127,22 +123,10 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db.close()
 
 
-def _apply_city_fallback(formatted: dict, lat, lon, default_city_text: str):
-    """
-    Kalau city kosong, isi minimal dengan koordinat atau teks default.
-    """
-    if not formatted.get("city"):
-        if lat is not None and lon is not None:
-            formatted["city"] = f"Lat {lat:.2f}, Lon {lon:.2f}"
-        else:
-            formatted["city"] = default_city_text
-    return formatted
-
-
 def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     """
-    Panggil API OpenWeather dan SELALU simpan ke DB
-    (baik otomatis maupun manual).
+    Panggil API OpenWeather dan simpan ke DB.
+    Logika hampir sama seperti kode awalmu, cuma ditambah condition.
     """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
@@ -161,7 +145,7 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
         if res.status_code != 200:
             msg = data.get("message", "Gagal ambil data dari API cuaca")
             formatted = {
-                "city": None,
+                "city": data.get("name") or "Lokasi tidak diketahui",
                 "temp": None,
                 "feels_like": None,
                 "description": f"Gagal ambil data: {msg}",
@@ -170,23 +154,17 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
                 "condition_id": None,
                 "updated_at": datetime.now().strftime("%H:%M:%S"),
             }
-            formatted = _apply_city_fallback(
-                formatted, lat, lon, "Lokasi tidak diketahui"
-            )
             save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
 
         formatted = format_weather(data)
-        formatted = _apply_city_fallback(
-            formatted, lat, lon, "Lokasi tidak diketahui"
-        )
         save_log(mode, data, formatted, lat=lat, lon=lon)
         return formatted
 
     except requests.RequestException as e:
         print("Error saat memanggil OpenWeather:", e)
         formatted = {
-            "city": None,
+            "city": "Lokasi tidak diketahui",
             "temp": None,
             "feels_like": None,
             "description": "Tidak bisa terhubung ke server cuaca",
@@ -195,15 +173,12 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "condition_id": None,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
         }
-        formatted = _apply_city_fallback(
-            formatted, lat, lon, "Lokasi tidak diketahui"
-        )
         save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
 
 
 def get_weather_default() -> dict:
-    """Cuaca default berbasis nama kota (untuk WebSocket, mode otomatis)."""
+    """Cuaca default kota Pontianak (mode WebSocket)."""
     return _call_openweather(
         {"q": f"{CITY},{COUNTRY_CODE}"},
         mode="otomatis",
@@ -211,7 +186,7 @@ def get_weather_default() -> dict:
 
 
 def get_weather_by_coords(lat: float, lon: float) -> dict:
-    """Cuaca berdasarkan koordinat lat/lon (mode manual / klik peta)."""
+    """Cuaca berdasarkan koordinat (mode manual / klik peta)."""
     return _call_openweather(
         {"lat": lat, "lon": lon},
         mode="manual",
@@ -222,16 +197,12 @@ def get_weather_by_coords(lat: float, lon: float) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Halaman utama: render templates/index.html."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
-    """
-    WebSocket: kirim data cuaca default berkala ke client.
-    Dipakai untuk mode otomatis (kota default).
-    """
+    """WebSocket untuk update cuaca Pontianak berkala."""
     await websocket.accept()
     try:
         while True:
@@ -249,7 +220,7 @@ async def ws(websocket: WebSocket):
 @app.get("/weather", response_class=JSONResponse)
 async def weather_endpoint(lat: float, lon: float):
     """
-    Endpoint HTTP biasa:
+    Endpoint HTTP:
     /weather?lat=...&lon=...
     Dipanggil saat user klik peta.
     """
