@@ -244,8 +244,45 @@
       }
     }
 
-    // === MAPPING KONDISI -> ICON WEATHER ICONS ===
-    function getIconClass(condition) {
+    // === MAPPING KONDISI -> ICON WEATHER ICONS (lebih detail by weather_id) ===
+    function getIconClass(condition, code, description = "") {
+      // kalau ada kode (id) pakai ini dulu
+      if (typeof code === "number") {
+        if (code >= 200 && code < 300) {
+          // Thunderstorm
+          return "wi-thunderstorm";
+        } else if (code >= 300 && code < 400) {
+          // Drizzle
+          return "wi-sprinkle";
+        } else if (code >= 500 && code < 600) {
+          // Rain
+          if (code === 511) return "wi-rain-mix";    // freezing rain
+          if (code >= 520) return "wi-showers";      // shower rain
+          return "wi-rain";
+        } else if (code >= 600 && code < 700) {
+          // Snow / sleet
+          if (code >= 611 && code <= 622) return "wi-sleet";
+          return "wi-snow";
+        } else if (code >= 700 && code < 800) {
+          // Atmosphere: mist, smoke, haze, fog, dust, sand, ash, squall, tornado
+          if (code === 781) return "wi-tornado";
+          if (code === 771) return "wi-strong-wind";
+          if (code === 741) return "wi-fog";
+          // sisanya: kabut / debu
+          return "wi-dust";
+        } else if (code === 800) {
+          // Clear
+          return "wi-day-sunny";
+        } else if (code > 800 && code < 900) {
+          // Clouds 80x
+          if (code === 801) return "wi-day-sunny-overcast"; // few clouds
+          if (code === 802) return "wi-cloud";               // scattered
+          if (code === 803 || code === 804) return "wi-cloudy"; // broken / overcast
+          return "wi-cloudy";
+        }
+      }
+
+      // fallback kalau gak ada code / tidak cocok
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
         case "Drizzle":      return "wi-sprinkle";
@@ -270,9 +307,9 @@
     function applyWeatherToUI(data, mode = "otomatis") {
       cityEl.textContent = data.city || "Lokasi tidak diketahui";
 
-      // ICON di kartu
+      // ICON di kartu (pakai condition + condition_id)
       if (iconEl) {
-        const cls = getIconClass(data.condition);
+        const cls = getIconClass(data.condition, data.condition_id, data.description);
         iconEl.className = "wi " + cls;
       }
 
@@ -365,7 +402,7 @@
                 : data.temp) + "°C"
             : "--°C";
 
-        const iconClass = getIconClass(data.condition);
+        const iconClass = getIconClass(data.condition, data.condition_id, data.description);
 
         const popupHtml = `
           <div style="text-align:center;">
@@ -388,7 +425,8 @@
     }
 
     function initMap() {
-      const map = L.map("map").setView([-2.5, 118], 4);
+      // === 1 DUNIA: mulai dari view global ===
+      const map = L.map("map").setView([0, 0], 2);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
