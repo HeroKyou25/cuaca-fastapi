@@ -8,17 +8,16 @@
   <!-- Leaflet CSS (peta) -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
-
-  <!-- Weather Icons (ikon cuaca, bukan dari OpenWeather) -->
-  <link
-    rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css"
-    integrity="sha512-XN9Q9jzVv0Yg0v7lCMTAvF/ZSYq3dYt+vvwf8alQDTvrHnFqUPgwjTZKZz2ztF0qJ5aKxN1L5/8sY5VYB9r4Pg=="
     crossorigin="anonymous"
     referrerpolicy="no-referrer"
+  />
+
+  <!-- Weather Icons -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
   />
 
   <style>
@@ -137,12 +136,9 @@
   <div class="card">
     <h1>Cuaca Real-time</h1>
     <div class="city" id="city">Mengambil data...</div>
-
-    <!-- ICON CUACA -->
-    <div style="margin-bottom: 8px;">
+    <div style="margin: 6px 0;">
       <i id="weather_icon" class="wi wi-na" style="font-size: 48px;"></i>
     </div>
-
     <div class="temp" id="temp">--°C</div>
     <div class="desc" id="description">-</div>
 
@@ -245,7 +241,6 @@
       }
     }
 
-    // Mapping kondisi -> icon Weather Icons
     function getIconClass(condition) {
       switch (condition) {
         case "Thunderstorm": return "wi-thunderstorm";
@@ -271,7 +266,7 @@
     function applyWeatherToUI(data, mode = "otomatis") {
       cityEl.textContent = data.city || "Lokasi tidak diketahui";
 
-      // === ICON CUACA ===
+      // set icon kalau ada condition
       if (iconEl) {
         const cls = getIconClass(data.condition);
         iconEl.className = "wi " + cls;
@@ -319,6 +314,7 @@
 
       socket.onmessage = (event) => {
         if (manualMode) {
+          // kalau sudah klik peta, abaikan data dari WebSocket
           return;
         }
         try {
