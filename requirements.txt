@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
 requests
-jinja2
 sqlalchemy
+jinja2
+pytz
