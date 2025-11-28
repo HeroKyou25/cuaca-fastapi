@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -65,6 +65,13 @@ COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")
 UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))
 # =======================
 
+# ==== WAKTU WIB (Asia/Pontianak, UTC+7) ====
+WIB = timezone(timedelta(hours=7))
+
+
+def now_wib_str() -> str:
+    return datetime.now(WIB).strftime("%H:%M:%S WIB")
+
 
 def format_weather(data: dict) -> dict:
     """
@@ -83,7 +90,7 @@ def format_weather(data: dict) -> dict:
             "humidity": data["main"]["humidity"],
             "condition": weather_main,
             "condition_id": weather_id,
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib_str(),
         }
     except Exception as e:
         print("Error format_weather:", e, "DATA:", data)
@@ -95,7 +102,7 @@ def format_weather(data: dict) -> dict:
             "humidity": None,
             "condition": None,
             "condition_id": None,
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib_str(),
         }
 
 
@@ -105,7 +112,7 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db = SessionLocal()
         log = WeatherLog(
             mode=mode,
-            api_called_at=datetime.utcnow(),
+            api_called_at=datetime.utcnow(),  # log di DB tetap pakai UTC
             city=formatted.get("city"),
             lat=lat,
             lon=lon,
@@ -126,7 +133,8 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
 def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     """
     Panggil API OpenWeather dan simpan ke DB.
-    Logika hampir sama seperti kode awalmu, cuma ditambah condition.
+    - Dipakai baik otomatis (Pontianak) maupun manual (klik peta / lat, lon).
+    - Kalau API error, tetap balikin data yang bisa ditampilkan.
     """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
@@ -143,16 +151,26 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
         print("DATA DARI OPENWEATHER:", data)
 
         if res.status_code != 200:
-            msg = data.get("message", "Gagal ambil data dari API cuaca")
+            # Tangani error dengan pesan yang lebih manusiawi
+            raw_msg = data.get("message", "")
+            msg_lower = raw_msg.lower() if isinstance(raw_msg, str) else ""
+
+            if "city not found" in msg_lower:
+                desc = "Data cuaca tidak tersedia di titik ini (kemungkinan laut / di luar jangkauan)."
+            elif raw_msg:
+                desc = f"Gagal ambil data: {raw_msg}"
+            else:
+                desc = "Gagal ambil data dari API cuaca."
+
             formatted = {
                 "city": data.get("name") or "Lokasi tidak diketahui",
                 "temp": None,
                 "feels_like": None,
-                "description": f"Gagal ambil data: {msg}",
+                "description": desc,
                 "humidity": None,
                 "condition": None,
                 "condition_id": None,
-                "updated_at": datetime.now().strftime("%H:%M:%S"),
+                "updated_at": now_wib_str(),
             }
             save_log(mode, data, formatted, lat=lat, lon=lon)
             return formatted
@@ -171,14 +189,14 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
             "humidity": None,
             "condition": None,
             "condition_id": None,
-            "updated_at": datetime.now().strftime("%H:%M:%S"),
+            "updated_at": now_wib_str(),
         }
         save_log(mode, {"error": str(e)}, formatted, lat=lat, lon=lon)
         return formatted
 
 
 def get_weather_default() -> dict:
-    """Cuaca default kota Pontianak (mode WebSocket)."""
+    """Cuaca default kota Pontianak (mode WebSocket / otomatis)."""
     return _call_openweather(
         {"q": f"{CITY},{COUNTRY_CODE}"},
         mode="otomatis",
@@ -202,7 +220,7 @@ async def root(request: Request):
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
-    """WebSocket untuk update cuaca Pontianak berkala."""
+    """WebSocket untuk update cuaca Pontianak berkala (mode otomatis)."""
     await websocket.accept()
     try:
         while True:
@@ -222,7 +240,7 @@ async def weather_endpoint(lat: float, lon: float):
     """
     Endpoint HTTP:
     /weather?lat=...&lon=...
-    Dipanggil saat user klik peta.
+    Dipanggil saat user klik peta (mode manual).
     """
     weather = get_weather_by_coords(lat, lon)
     return JSONResponse(content=weather)
