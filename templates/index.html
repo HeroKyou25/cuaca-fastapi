@@ -133,9 +133,9 @@
 <body>
   <div class="card">
     <h1>Cuaca Real-time</h1>
+    <!-- KARTU INI KHUSUS PONTIANAK (DATA OTOMATIS) -->
     <div class="city" id="city">Mengambil data...</div>
 
-    <!-- ICON CUACA DI CARD -->
     <div style="margin: 6px 0;">
       <i id="weather_icon" class="wi wi-na" style="font-size: 48px;"></i>
     </div>
@@ -152,7 +152,6 @@
     <div class="debug" id="debug">Status: inisialisasi...</div>
   </div>
 
-  <!-- RIWAYAT CUACA -->
   <div class="history-container">
     <h2>Riwayat Cuaca</h2>
     <table id="historyTable">
@@ -196,7 +195,6 @@
     const iconEl = document.getElementById("weather_icon");
 
     let socket = null;
-    let manualMode = false;
 
     const historyBody = document.querySelector("#historyTable tbody");
     const MAX_HISTORY = 20;
@@ -207,7 +205,7 @@
     }
 
     function addHistoryRow(data, mode) {
-      // HANYA mode otomatis yang masuk riwayat
+      // HANYA MODE OTOMATIS YANG MASUK RIWAYAT
       if (mode !== "otomatis") return;
       if (!historyBody) return;
 
@@ -243,46 +241,43 @@
 
     // === NORMALISASI KOORDINAT ===
     function clampLat(lat) {
-      // biar gak nyentuh kutub ekstrem
       return Math.max(-89.9, Math.min(89.9, lat));
     }
 
     function normalizeLon(lon) {
-      // bawa lon ke range [-180, 180]
       let x = ((lon + 180) % 360 + 360) % 360 - 180;
       return x;
     }
 
-    // === ICON MAPPING: bedakan 800–804 ===
+    // === ICON MAPPING 800–804, DLL ===
     function getIconClass(condition, code) {
       if (typeof code === "number") {
-        if (code >= 200 && code < 300) return "wi-thunderstorm"; // badai
-        if (code >= 300 && code < 400) return "wi-sprinkle";     // gerimis
+        if (code >= 200 && code < 300) return "wi-thunderstorm";
+        if (code >= 300 && code < 400) return "wi-sprinkle";
 
-        if (code >= 500 && code < 600) {                         // hujan
-          if (code === 511) return "wi-rain-mix";                // freezing rain
-          if (code >= 520) return "wi-showers";                  // shower
+        if (code >= 500 && code < 600) {
+          if (code === 511) return "wi-rain-mix";
+          if (code >= 520) return "wi-showers";
           return "wi-rain";
         }
 
-        if (code >= 600 && code < 700) {                         // salju
-          if (code >= 611 && code <= 622) return "wi-sleet";     // sleet
+        if (code >= 600 && code < 700) {
+          if (code >= 611 && code <= 622) return "wi-sleet";
           return "wi-snow";
         }
 
-        if (code >= 700 && code < 800) {                         // kabut/debu
+        if (code >= 700 && code < 800) {
           if (code === 781) return "wi-tornado";
           if (code === 771) return "wi-strong-wind";
           if (code === 741) return "wi-fog";
           return "wi-dust";
         }
 
-        // 800–804 detail awan
-        if (code === 800) return "wi-day-sunny";            // cerah
-        if (code === 801) return "wi-day-sunny-overcast";   // sedikit awan
-        if (code === 802) return "wi-cloud";                // awan tersebar
-        if (code === 803) return "wi-cloudy";               // awan pecah
-        if (code === 804) return "wi-cloudy-windy";         // mendung berat
+        if (code === 800) return "wi-day-sunny";
+        if (code === 801) return "wi-day-sunny-overcast";
+        if (code === 802) return "wi-cloud";
+        if (code === 803) return "wi-cloudy";
+        if (code === 804) return "wi-cloudy-windy";
       }
 
       switch (condition) {
@@ -306,12 +301,9 @@
       }
     }
 
-    function applyWeatherToUI(data, mode = "otomatis", extra = {}) {
-      let cityLabel = data.city;
-      if (!cityLabel && extra.lat != null && extra.lon != null) {
-        cityLabel = `Lat ${extra.lat.toFixed(2)}, Lon ${extra.lon.toFixed(2)}`;
-      }
-      cityEl.textContent = cityLabel || "Lokasi tidak diketahui";
+    // === KHUSUS PONTIANAK (DATA DARI WEBSOCKET) ===
+    function applyAutoWeatherToUI(data) {
+      cityEl.textContent = data.city || "Kota Pontianak";
 
       if (iconEl) {
         const cls = getIconClass(data.condition, data.condition_id);
@@ -342,13 +334,11 @@
 
       descEl.textContent = data.description || "-";
 
-      // PENTING: pakai updated_at dari BACKEND (WIB)
       if (data.updated_at) {
         updatedAtEl.textContent = "Terakhir update: " + data.updated_at;
       }
 
-      // Riwayat: hanya otomatis
-      addHistoryRow(data, mode);
+      addHistoryRow(data, "otomatis");
     }
 
     function connectWebSocket() {
@@ -357,15 +347,14 @@
       socket = new WebSocket(wsUrl);
 
       socket.onopen = () => {
-        log("WebSocket terhubung ✅ (mode otomatis)");
+        log("WebSocket terhubung ✅ (mode otomatis Pontianak)");
       };
 
       socket.onmessage = (event) => {
-        if (manualMode) return;
         try {
           const data = JSON.parse(event.data);
           console.log("DATA DARI WS:", data);
-          applyWeatherToUI(data, "otomatis");
+          applyAutoWeatherToUI(data);
         } catch (e) {
           console.error("Error parsing message:", e);
           log("gagal parsing data dari WebSocket");
@@ -373,12 +362,8 @@
       };
 
       socket.onclose = () => {
-        if (!manualMode) {
-          log("koneksi putus, mencoba ulang dalam 3 detik...");
-          setTimeout(connectWebSocket, 3000);
-        } else {
-          log("WebSocket ditutup (mode manual via peta)");
-        }
+        log("WebSocket putus, mencoba ulang dalam 3 detik...");
+        setTimeout(connectWebSocket, 3000);
       };
 
       socket.onerror = (err) => {
@@ -388,19 +373,14 @@
     }
 
     async function fetchWeatherForCoords(rawLat, rawLon, marker) {
-      // NORMALISASI KOORDINAT di sini
       const lat = clampLat(rawLat);
       const lon = normalizeLon(rawLon);
 
       try {
-        log(`ambil cuaca koordinat (lat=${lat.toFixed(2)}, lon=${lon.toFixed(2)}) ...`);
+        log(`ambil cuaca manual (lat=${lat.toFixed(2)}, lon=${lon.toFixed(2)}) ...`);
         const res = await fetch(`/weather?lat=${lat}&lon=${lon}`);
         const data = await res.json();
         console.log("DATA DARI /weather:", data);
-
-        // update card (manual, tidak ke riwayat)
-        applyWeatherToUI(data, "manual", { lat, lon });
-        log("mode manual (peta) - klik lagi untuk lokasi lain");
 
         const tempText =
           data.temp !== null && data.temp !== undefined
@@ -427,6 +407,9 @@
         if (marker) {
           marker.bindPopup(popupHtml).openPopup();
         }
+
+        log("Status: mode manual (peta) - klik lagi untuk lokasi lain");
+
       } catch (e) {
         console.error("Error fetch /weather:", e);
         log("gagal ambil data dari server");
@@ -434,8 +417,7 @@
     }
 
     function initMap() {
-      // peta 1 dunia
-      const map = L.map("map").setView([0, 0], 2);
+      const map = L.map("map").setView([0, 0], 2); // 1 dunia
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
@@ -448,13 +430,8 @@
         const rawLat = e.latlng.lat;
         const rawLon = e.latlng.lng;
 
-        manualMode = true;
-
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.close();
-        }
-
-        // buat/geser marker di posisi KLIK (bukan yang sudah ternormalisasi)
+        // marker mengikuti titik klik (manual),
+        // tapi KARTU ATAS TETAP PONTIANAK (tidak kita sentuh)
         if (marker) {
           marker.setLatLng(e.latlng);
         } else {
@@ -466,19 +443,8 @@
     }
 
     window.addEventListener("load", () => {
-      connectWebSocket();
-      initMap();
-
-      const AUTO_MODE_DURATION_MS = 60 * 1000;
-      setTimeout(() => {
-        if (!manualMode && socket) {
-          manualMode = true;
-          log("Mode otomatis selesai (1 menit). Silakan pilih lokasi di peta.");
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close();
-          }
-        }
-      }, AUTO_MODE_DURATION_MS);
+      connectWebSocket(); // pontianak realtime
+      initMap();          // peta manual
     });
   </script>
 </body>
