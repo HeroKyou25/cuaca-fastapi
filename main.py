@@ -57,15 +57,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # ==== KONFIG CUACA ====
+
 FALLBACK_API_KEY = "ca21257afebb7702df3c0497ccffa219"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or FALLBACK_API_KEY
 
-CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")
-COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "10"))
-# =======================
+CITY = os.getenv("WEATHER_DEFAULT_CITY", "Pontianak")      # kota default untuk WebSocket
+COUNTRY_CODE = os.getenv("WEATHER_DEFAULT_COUNTRY", "ID")  # kode negara
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "30"))  # interval update WS (detik) -> 30 detik
 
-# ==== WAKTU WIB (Asia/Pontianak, UTC+7) ====
+# ==== WAKTU WIB (Asia/Pontianak) ====
+
 WIB = timezone(timedelta(hours=7))
 
 
@@ -73,11 +74,11 @@ def now_wib_str() -> str:
     return datetime.now(WIB).strftime("%H:%M:%S WIB")
 
 
+# =============================
+
+
 def format_weather(data: dict) -> dict:
-    """
-    Format JSON dari OpenWeather ke bentuk sederhana untuk frontend.
-    Mirip versi awalmu, ditambah condition + condition_id.
-    """
+    """Format JSON dari OpenWeather ke bentuk sederhana untuk frontend."""
     try:
         weather_main = data["weather"][0]["main"]   # ex: "Clouds"
         weather_id = data["weather"][0]["id"]       # ex: 803
@@ -112,7 +113,7 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
         db = SessionLocal()
         log = WeatherLog(
             mode=mode,
-            api_called_at=datetime.utcnow(),  # log di DB tetap pakai UTC
+            api_called_at=datetime.utcnow(),  # disimpan di DB dalam UTC
             city=formatted.get("city"),
             lat=lat,
             lon=lon,
@@ -132,9 +133,8 @@ def save_log(mode: str, api_data: dict, formatted: dict, lat=None, lon=None):
 
 def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
     """
-    Panggil API OpenWeather dan simpan ke DB.
-    - Dipakai baik otomatis (Pontianak) maupun manual (klik peta / lat, lon).
-    - Kalau API error, tetap balikin data yang bisa ditampilkan.
+    Panggil API OpenWeather dan simpan ke DB
+    (mode "otomatis" = Pontianak via WebSocket, mode "manual" = klik peta).
     """
     url = "https://api.openweathermap.org/data/2.5/weather"
     final_params = {
@@ -151,17 +151,8 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
         print("DATA DARI OPENWEATHER:", data)
 
         if res.status_code != 200:
-            # Tangani error dengan pesan yang lebih manusiawi
-            raw_msg = data.get("message", "")
-            msg_lower = raw_msg.lower() if isinstance(raw_msg, str) else ""
-
-            if "city not found" in msg_lower:
-                desc = "Data cuaca tidak tersedia di titik ini (kemungkinan laut / di luar jangkauan)."
-            elif raw_msg:
-                desc = f"Gagal ambil data: {raw_msg}"
-            else:
-                desc = "Gagal ambil data dari API cuaca."
-
+            msg = data.get("message", "Gagal ambil data dari API cuaca")
+            desc = f"Gagal ambil data: {msg}"
             formatted = {
                 "city": data.get("name") or "Lokasi tidak diketahui",
                 "temp": None,
@@ -196,7 +187,7 @@ def _call_openweather(params: dict, mode: str, lat=None, lon=None) -> dict:
 
 
 def get_weather_default() -> dict:
-    """Cuaca default kota Pontianak (mode WebSocket / otomatis)."""
+    """Cuaca default berbasis nama kota (untuk WebSocket, Pontianak)."""
     return _call_openweather(
         {"q": f"{CITY},{COUNTRY_CODE}"},
         mode="otomatis",
@@ -204,7 +195,7 @@ def get_weather_default() -> dict:
 
 
 def get_weather_by_coords(lat: float, lon: float) -> dict:
-    """Cuaca berdasarkan koordinat (mode manual / klik peta)."""
+    """Cuaca berdasarkan koordinat lat/lon (mode manual / klik peta)."""
     return _call_openweather(
         {"lat": lat, "lon": lon},
         mode="manual",
@@ -215,18 +206,22 @@ def get_weather_by_coords(lat: float, lon: float) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
+    """Halaman utama."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
-    """WebSocket untuk update cuaca Pontianak berkala (mode otomatis)."""
+    """
+    WebSocket: kirim data cuaca Pontianak berkala ke client.
+    Jalan terus (tidak dipaksa mati oleh backend).
+    """
     await websocket.accept()
     try:
         while True:
             weather = get_weather_default()
             await websocket.send_json(weather)
-            await asyncio.sleep(UPDATE_INTERVAL)
+            await asyncio.sleep(UPDATE_INTERVAL)  # 30 detik
     except WebSocketDisconnect:
         print("WebSocket client disconnected.")
     except Exception as e:
@@ -238,9 +233,186 @@ async def ws(websocket: WebSocket):
 @app.get("/weather", response_class=JSONResponse)
 async def weather_endpoint(lat: float, lon: float):
     """
-    Endpoint HTTP:
+    Endpoint HTTP biasa:
     /weather?lat=...&lon=...
     Dipanggil saat user klik peta (mode manual).
     """
     weather = get_weather_by_coords(lat, lon)
     return JSONResponse(content=weather)
+
+
+# ========= ENDPOINT LIHAT LOG SEBAGAI JSON =========
+
+@app.get("/logs", response_class=JSONResponse)
+async def get_logs(limit: int = 50):
+    """
+    Lihat rekapan pemanggilan API cuaca (JSON).
+    """
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(WeatherLog)
+            .order_by(WeatherLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        result = []
+        for r in rows:
+            result.append(
+                {
+                    "id": r.id,
+                    "api_called_at": r.api_called_at.isoformat(),
+                    "mode": r.mode,
+                    "city": r.city,
+                    "lat": r.lat,
+                    "lon": r.lon,
+                    "temp": r.temp,
+                    "feels_like": r.feels_like,
+                    "humidity": r.humidity,
+                    "description": r.description,
+                }
+            )
+        return JSONResponse(content=result)
+    finally:
+        db.close()
+
+
+# ========= ENDPOINT LIHAT LOG DALAM BENTUK DUA TABEL HTML =========
+
+@app.get("/logs-view", response_class=HTMLResponse)
+async def logs_view(limit: int = 50):
+    """
+    Viewer HTML sederhana untuk melihat log:
+    - Tabel 1: mode otomatis
+    - Tabel 2: mode manual
+    """
+    db = SessionLocal()
+    try:
+        auto_rows = (
+            db.query(WeatherLog)
+            .filter(WeatherLog.mode == "otomatis")
+            .order_by(WeatherLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+        manual_rows = (
+            db.query(WeatherLog)
+            .filter(WeatherLog.mode == "manual")
+            .order_by(WeatherLog.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+        def build_rows(rows):
+            html = ""
+            for r in rows:
+                html += f"""
+                <tr>
+                  <td>{r.id}</td>
+                  <td>{r.api_called_at}</td>
+                  <td>{r.city or ""}</td>
+                  <td>{r.lat or ""}</td>
+                  <td>{r.lon or ""}</td>
+                  <td>{r.temp or ""}</td>
+                  <td>{r.feels_like or ""}</td>
+                  <td>{r.humidity or ""}</td>
+                  <td>{r.description or ""}</td>
+                </tr>
+                """
+            return html
+
+        auto_rows_html = build_rows(auto_rows)
+        manual_rows_html = build_rows(manual_rows)
+
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="id">
+        <head>
+          <meta charset="utf-8" />
+          <title>Log Pemanggilan API Cuaca</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              background: #f5f5f5;
+              padding: 20px;
+            }}
+            h1 {{
+              margin-bottom: 4px;
+            }}
+            h2 {{
+              margin-top: 24px;
+              margin-bottom: 8px;
+            }}
+            table {{
+              border-collapse: collapse;
+              width: 100%;
+              background: #fff;
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+              font-size: 0.9rem;
+              margin-bottom: 16px;
+            }}
+            thead {{
+              background: #f0f0f0;
+            }}
+            th, td {{
+              padding: 6px 8px;
+              border-bottom: 1px solid #e0e0e0;
+              text-align: left;
+            }}
+            tr:nth-child(even) td {{
+              background: #fafafa;
+            }}
+          </style>
+        </head>
+        <body>
+          <h1>Log Pemanggilan API Cuaca</h1>
+          <p>Menampilkan maks {limit} data terakhir per mode.</p>
+
+          <h2>Mode Otomatis (WebSocket, kota default)</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Waktu (UTC)</th>
+                <th>Kota</th>
+                <th>Lat</th>
+                <th>Lon</th>
+                <th>Temp</th>
+                <th>Feels Like</th>
+                <th>Humidity</th>
+                <th>Deskripsi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auto_rows_html}
+            </tbody>
+          </table>
+
+          <h2>Mode Manual (klik peta)</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Waktu (UTC)</th>
+                <th>Kota</th>
+                <th>Lat</th>
+                <th>Lon</th>
+                <th>Temp</th>
+                <th>Feels Like</th>
+                <th>Humidity</th>
+                <th>Deskripsi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {manual_rows_html}
+            </tbody>
+          </table>
+        </body>
+        </html>
+        """
+
+        return HTMLResponse(content=html)
+    finally:
+        db.close()
